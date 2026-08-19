@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin==1.14.1"]
+build-backend = "maturin"
+
+[project]
+name = "nedotokenizer"
+version = "0.2.0"
+description = "Byte-exact, morphology-aware tokenizer for Turkish and mixed Turkish-code text"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES/ZEMBEREK_NOTICE.md"]
+authors = [
+  { name = "Nedim Mutlu Sezer" },
+  { name = "Yağız Ekrem Dalar" },
+  { name = "Feyzi Arda Salihoğlu" },
+  { name = "Ömer Faruk Aksoy" },
+  { name = "Ahmet Rıfat Öztürk" },
+]
+keywords = ["tokenizer", "turkish", "morphology", "nlp", "rust"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Text Processing :: Linguistic",
+]
+
+[project.urls]
+Homepage = "https://github.com/ethosoftai/NedoTokenizer"
+Repository = "https://github.com/ethosoftai/NedoTokenizer"
+Issues = "https://github.com/ethosoftai/NedoTokenizer/issues"
+
+[tool.maturin]
+manifest-path = "crates/nedo-python/Cargo.toml"
+python-source = "python"
+module-name = "nedotokenizer._native"
+bindings = "pyo3"
+compatibility = "manylinux_2_17"
+strip = true
+include = [
+  { path = "assets/native/MANIFEST.sha256", format = "sdist" },
+  { path = "assets/native/model-compressed", format = "sdist" },
+  { path = "assets/native/nedo-morph-v1.bin", format = "sdist" },
+  { path = "assets/surface-vocab.bin", format = "wheel" },
+  { path = "assets/surface-vocab.bin", format = "sdist" },
+]

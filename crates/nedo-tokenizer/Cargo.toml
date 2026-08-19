@@ -1,0 +1,20 @@
+[package]
+name = "nedo-tokenizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+
+[features]
+surface-audit = []
+compiled-surface-table = []
+
+[dependencies]
+nedo-core = { path = "../nedo-core" }
+nedo-format = { path = "../nedo-format" }
+nedo-morph-bundle = { path = "../nedo-morph-bundle" }
+sha2 = "=0.10.9"
+
+[lints]
+workspace = true
