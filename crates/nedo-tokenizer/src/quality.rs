@@ -73,9 +73,6 @@ pub(super) fn analyze_token_with_quality_fallback(
         return Ok(analyses);
     }
 
-    if let Some(analysis) = direct_informal_analysis(token) {
-        return Ok(vec![analysis]);
-    }
     if let Some(analysis) = attached_question_analysis(morphology, token)? {
         return Ok(vec![analysis]);
     }
@@ -104,33 +101,6 @@ pub(super) fn analyze_token_with_quality_fallback(
         )]);
     }
     Ok(Vec::new())
-}
-
-fn direct_informal_analysis(token: &str) -> Option<NativeAnalysis> {
-    let lowered = turkish_lower(token);
-    let (lemma, primary_pos, cut_char_counts) = match lowered.as_str() {
-        "napıyon" => ("ne yapmak", "Verb", &[3_usize, 6_usize][..]),
-        "noluyo" => ("ne olmak", "Verb", &[3_usize][..]),
-        "dicem" => ("demek", "Verb", &[2_usize, 4_usize][..]),
-        "söylicem" => ("söylemek", "Verb", &[5_usize, 7_usize][..]),
-        "bişey" => ("bir şey", "Noun", &[2_usize][..]),
-        "deyil" => ("değil", "Verb", &[][..]),
-        "olm" => ("oğlum", "Noun", &[][..]),
-        "bi" => ("bir", "Num", &[][..]),
-        "deploy" => ("deploy", "Noun", &[][..]),
-        "loglar" => ("log", "Noun", &[3_usize][..]),
-        _ => return None,
-    };
-    let cuts = cuts_after_character_counts(token, cut_char_counts)?;
-    Some(synthetic_analysis(
-        token,
-        &cuts,
-        lemma,
-        primary_pos,
-        "Informal",
-        "Informal",
-        true,
-    ))
 }
 
 fn numeric_time_with_suffix_analysis(token: &str) -> Option<NativeAnalysis> {
@@ -363,14 +333,6 @@ fn synthetic_analysis(
     }
 }
 
-fn cuts_after_character_counts(token: &str, counts: &[usize]) -> Option<Vec<usize>> {
-    counts
-        .iter()
-        .copied()
-        .map(|count| byte_boundary_after_characters(token, count))
-        .collect()
-}
-
 fn byte_boundary_after_characters(token: &str, count: usize) -> Option<usize> {
     if count == 0 {
         return Some(0);
@@ -589,33 +551,9 @@ fn turkish_lower(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        direct_informal_analysis, numeric_time_with_suffix_analysis, trailing_emphasis_candidate,
+        numeric_time_with_suffix_analysis, trailing_emphasis_candidate,
         turkish_composition_candidate,
     };
-
-    #[test]
-    fn exact_informal_rules_are_byte_aligned() {
-        for token in [
-            "napıyon",
-            "noluyo",
-            "dicem",
-            "söylicem",
-            "bişey",
-            "deyil",
-            "olm",
-            "bi",
-            "deploy",
-            "loglar",
-        ] {
-            let analysis = direct_informal_analysis(token).expect("known informal form");
-            let reconstructed = analysis
-                .morphemes
-                .iter()
-                .map(|morpheme| morpheme.surface.as_str())
-                .collect::<String>();
-            assert_eq!(reconstructed, token);
-        }
-    }
 
     #[test]
     fn clock_suffix_fallback_is_exact() {
