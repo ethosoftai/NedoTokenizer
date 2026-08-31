@@ -81,28 +81,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "nedo-cli"
-version = "0.2.0"
-dependencies = [
- "nedo-tokenizer",
- "sha2",
-]
-
-[[package]]
 name = "nedo-core"
 version = "0.2.0"
 dependencies = [
  "nedo-format",
-]
-
-[[package]]
-name = "nedo-experiments"
-version = "0.2.0"
-dependencies = [
- "nedo-tokenizer",
- "serde",
- "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -124,14 +106,6 @@ version = "0.2.0"
 dependencies = [
  "nedo-tokenizer",
  "pyo3",
- "serde_json",
-]
-
-[[package]]
-name = "nedo-reference"
-version = "0.2.0"
-dependencies = [
- "serde",
  "serde_json",
 ]
 

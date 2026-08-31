@@ -1,0 +1,107 @@
+{
+  "algorithm": "lexical-constrained byte-level BPE",
+  "asset_magic": "NDSRF003",
+  "byte_fallback_ids": 256,
+  "control_ids": 3,
+  "heldout_benchmark": {
+    "final32k": {
+      "bytes": 98844686,
+      "bytes_per_token": 3.907097,
+      "fallback_pct": 31.074333,
+      "fallback_tokens": 7861420,
+      "records": 137059,
+      "tokens": 25298757
+    },
+    "old32k": {
+      "bytes": 98844686,
+      "bytes_per_token": 2.342971,
+      "fallback_pct": 4.81846,
+      "fallback_tokens": 2032800,
+      "records": 137059,
+      "tokens": 42187752
+    }
+  },
+  "learned_merge_entries": 31741,
+  "piece_stats": {
+    "emoji_scalar_entries": 5,
+    "invalid_utf8_entries": 91,
+    "learned_entries": 31741,
+    "max_entry_bytes": 82,
+    "mean_entry_bytes": 6.615607573800447,
+    "single_unicode_scalar_entries": 271,
+    "space_prefixed_entries": 18954,
+    "valid_utf8_entries": 31650,
+    "whitespace_only_entries": 103
+  },
+  "reference_benchmark": {
+    "cl100k_base": {
+      "bytes_per_token": 2.753182485174771,
+      "tokens": 35901974
+    },
+    "o200k_base": {
+      "bytes_per_token": 3.4408388788005952,
+      "tokens": 28726915
+    }
+  },
+  "roundtrip_smoke": [
+    {
+      "text": "Bugün hava çok güzel.",
+      "tokens": 5
+    },
+    {
+      "text": "Evlerimizden çıktık.",
+      "tokens": 4
+    },
+    {
+      "text": "Российская Федерация",
+      "tokens": 19
+    },
+    {
+      "text": "中华人民共和国",
+      "tokens": 19
+    },
+    {
+      "text": "😀 👨‍👩‍👧‍👦",
+      "tokens": 17
+    },
+    {
+      "text": "        print(x)",
+      "tokens": 5
+    },
+    {
+      "text": "\n\n    indentation",
+      "tokens": 4
+    }
+  ],
+  "schema": "nedotokenizer_surface_vocab_release_v1",
+  "status": "PASS",
+  "surface_payload_sha256": "ee309aa632c240165de2188964a079dafd59707a85b2f950b0aa854438e96547",
+  "surface_vocab_bytes": 336994,
+  "surface_vocab_sha256": "f8528d2c7479bba829b68aa82f6c5dfc68e414e1a11d04c871b31a3f34f2ac50",
+  "total_embedding_vocab": 32000,
+  "trainer": {
+    "backend": "huggingface-tokenizers BPE + ByteLevel(use_regex=false)",
+    "max_token_bytes": 96,
+    "min_frequency": 2,
+    "retained_merge_entries": 31741,
+    "tiktoken_version": "0.13.0",
+    "tokenizers_version": "0.20.3",
+    "trainer_merge_entries": 32758,
+    "trainer_requested_vocab_size": 33021,
+    "trainer_vocab_size": 33021
+  },
+  "training_sample": {
+    "dataset": "MercanSet V11 source-aware vocabulary sample",
+    "eval_modulus": 20,
+    "eval_sha256": "41baeea72a4b7ef478b48d50c056b4eb4248249252b80a6e0065a687c3bdfcf6",
+    "records": 2744278,
+    "sample_sha256": "09617be54ca25840ea7b7b2c4a70432328fd51f2eecceb4fe9a0c9bdcf97669f",
+    "source_count": 30,
+    "split_seed": "0x4e45444f42504531",
+    "text_bytes": 2001326142,
+    "train_records": 2607219,
+    "train_segment_sha256": "5621d6b8f86c4133d514cecd5b45392fbba20b834997f1a1eaa9184fdc2bfa8a",
+    "train_segmented_bytes": 2263444293
+  },
+  "training_source_commit": "f6bfef7c11ab9a124262e4f8c6501ef22d3f4b98"
+}
