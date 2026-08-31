@@ -1,5 +1,7 @@
 {
-  "acceptance_source_commit": "2efedb03c075f2a7f3674780a04f9d15f806d44f",
+  "acceptance_gate": "workspace tests PASS; 137059-document rich/flat parity PASS; byte roundtrip PASS; required root-boundary violations 0",
+  "acceptance_job": "6309023",
+  "acceptance_source_commit": "3527663a698338e9399cea289136ee4c80908d11",
   "algorithm": "root-hard suffix-soft byte-level BPE",
   "asset_magic": "NDSRF004",
   "boundary_policy": "first Turkish morphology cut hard (root | suffix-chain); internal suffix cuts soft; ordinary ASCII space may prefix the root",
