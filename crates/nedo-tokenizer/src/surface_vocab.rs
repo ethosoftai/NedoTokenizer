@@ -292,8 +292,10 @@ fn flat_unit_requires_split(
     maximum_chars: usize,
 ) -> Result<bool, TokenizerError> {
     let bytes = crate::unit_bytes(raw, unit.span)?;
-    let should_split =
-        unit.status == crate::TokenStatus::Code || unit.mode == crate::TokenMode::Opaque;
+    let should_split = matches!(
+        unit.status,
+        crate::TokenStatus::Unknown | crate::TokenStatus::Code
+    ) || unit.mode == crate::TokenMode::Opaque;
     if !should_split {
         return Ok(false);
     }
