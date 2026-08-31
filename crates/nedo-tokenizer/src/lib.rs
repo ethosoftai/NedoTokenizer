@@ -2634,6 +2634,13 @@ impl<'a> Tokenizer<'a> {
                 .phase_analysis_ns
                 .saturating_add(started.elapsed().as_nanos());
         }
+        if !surface_programs.is_empty() {
+            return Err(TokenizerError::InvalidTrainingEncoding(
+                "Turkish surface ID programs must be empty before context-sensitive encoding",
+            ));
+        }
+        let units =
+            flat_surface::split_long_surface_units(raw, units, self.config.max_fallback_chars)?;
         let started = telemetry.then(std::time::Instant::now);
         vocabulary.encode_flat_units_with_programs(
             raw,

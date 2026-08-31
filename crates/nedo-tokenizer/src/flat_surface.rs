@@ -52,6 +52,41 @@ pub(crate) struct SurfaceProgramUse {
     pub(crate) program: Arc<FlatSegmentProgram>,
 }
 
+pub(crate) fn split_long_surface_units(
+    raw: &[u8],
+    units: Vec<FlatSurfaceUnit>,
+    maximum_chars: usize,
+) -> Result<Vec<FlatSurfaceUnit>, TokenizerError> {
+    let mut output = Vec::with_capacity(units.len());
+    for unit in units {
+        let should_split = matches!(unit.status, TokenStatus::Unknown | TokenStatus::Code)
+            || unit.mode == TokenMode::Opaque;
+        if !should_split {
+            output.push(unit);
+            continue;
+        }
+        let spans = crate::chunk_span(
+            raw,
+            unit.span,
+            maximum_chars,
+            unit.mode == TokenMode::Opaque,
+        )?;
+        if spans.len() == 1 {
+            output.push(unit);
+            continue;
+        }
+        for span in spans {
+            output.push(FlatSurfaceUnit::new(
+                span,
+                unit.kind,
+                unit.mode,
+                unit.status,
+            ));
+        }
+    }
+    Ok(output)
+}
+
 pub(crate) fn scan_fixed_units(
     raw: &[u8],
     requested: TokenizerMode,
