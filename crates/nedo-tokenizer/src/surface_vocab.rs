@@ -3,11 +3,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
+use nedo_format::ByteSpan;
 use sha2::{Digest, Sha256};
 
 use crate::{
     flat_surface::{FlatSurfaceUnit, SurfaceProgramUse},
-    TokenizedDocument, TokenizedUnit, TokenizerError, TrainingEncoding,
+    LexicalKind, TokenizedDocument, TokenizedUnit, TokenizerError, TrainingEncoding,
 };
 
 /// Padding ID for surface-piece models.
@@ -111,7 +112,8 @@ impl SurfaceVocabularyTrainer {
         document: &TokenizedDocument,
         use_morphology: bool,
     ) -> Result<(), TokenizerError> {
-        for unit in document.units() {
+        let units = document.units();
+        for (unit_index, unit) in units.iter().enumerate() {
             let start = usize::try_from(unit.span.start)
                 .map_err(|_| TokenizerError::LengthOverflow("surface unit start"))?;
             let end = usize::try_from(unit.span.end)
@@ -121,6 +123,7 @@ impl SurfaceVocabularyTrainer {
                 .get(start..end)
                 .ok_or(TokenizerError::UnitOutsideDocument)?;
             self.observe_candidate(unit_bytes, 1);
+            self.observe_non_ascii_scalars(unit_bytes);
 
             if use_morphology {
                 let mut left = start;
@@ -138,6 +141,24 @@ impl SurfaceVocabularyTrainer {
                         .ok_or(TokenizerError::UnitOutsideDocument)?;
                     self.observe_candidate(piece, 4);
                     left = right;
+                }
+            }
+
+            if let Some(following) = units.get(unit_index.saturating_add(1)) {
+                if let Some(range) = prefix_bridge_range(
+                    document.raw(),
+                    unit.span,
+                    unit.kind,
+                    following.span,
+                    following.kind,
+                    &following.cuts,
+                    use_morphology,
+                )? {
+                    let piece = document
+                        .raw()
+                        .get(range)
+                        .ok_or(TokenizerError::UnitOutsideDocument)?;
+                    self.observe_candidate(piece, if use_morphology { 4 } else { 1 });
                 }
             }
         }
@@ -187,6 +208,17 @@ impl SurfaceVocabularyTrainer {
         *count = count.saturating_add(weight);
     }
 
+    fn observe_non_ascii_scalars(&mut self, value: &[u8]) {
+        let Ok(text) = std::str::from_utf8(value) else {
+            return;
+        };
+        for character in text.chars().filter(|character| !character.is_ascii()) {
+            let mut encoded = [0_u8; 4];
+            let scalar = character.encode_utf8(&mut encoded);
+            self.observe_candidate(scalar.as_bytes(), 1);
+        }
+    }
+
     fn prune(&mut self) {
         if self.counts.len() <= self.max_candidates {
             return;
@@ -201,6 +233,62 @@ impl SurfaceVocabularyTrainer {
         ranked.truncate(self.max_candidates);
         self.counts.extend(ranked);
     }
+}
+
+fn prefix_bridge_range(
+    raw: &[u8],
+    whitespace_span: ByteSpan,
+    whitespace_kind: LexicalKind,
+    following_span: ByteSpan,
+    following_kind: LexicalKind,
+    following_cuts: &[u64],
+    use_morphology: bool,
+) -> Result<Option<Range<usize>>, TokenizerError> {
+    if whitespace_kind != LexicalKind::Whitespace
+        || !matches!(following_kind, LexicalKind::Word | LexicalKind::Number)
+        || whitespace_span.end != following_span.start
+    {
+        return Ok(None);
+    }
+    let whitespace_start = usize::try_from(whitespace_span.start)
+        .map_err(|_| TokenizerError::LengthOverflow("surface prefix whitespace start"))?;
+    let whitespace_end = usize::try_from(whitespace_span.end)
+        .map_err(|_| TokenizerError::LengthOverflow("surface prefix whitespace end"))?;
+    if raw.get(whitespace_start..whitespace_end) != Some(b" ".as_slice()) {
+        return Ok(None);
+    }
+    let following_end = if use_morphology {
+        following_cuts.first().copied().unwrap_or(following_span.end)
+    } else {
+        following_span.end
+    };
+    let following_end = usize::try_from(following_end)
+        .map_err(|_| TokenizerError::LengthOverflow("surface prefix bridge end"))?;
+    if following_end <= whitespace_end {
+        return Ok(None);
+    }
+    Ok(Some(whitespace_start..following_end))
+}
+
+fn flat_unit_requires_split(
+    raw: &[u8],
+    unit: &FlatSurfaceUnit,
+    maximum_chars: usize,
+) -> Result<bool, TokenizerError> {
+    let bytes = crate::unit_bytes(raw, unit.span)?;
+    let should_split =
+        unit.status == crate::TokenStatus::Code || unit.mode == crate::TokenMode::Opaque;
+    if !should_split {
+        return Ok(false);
+    }
+    if unit.mode == crate::TokenMode::Opaque {
+        return Ok(bytes.len() > maximum_chars);
+    }
+    if bytes.len() <= maximum_chars {
+        return Ok(false);
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| TokenizerError::InvalidUtf8Unit)?;
+    Ok(text.chars().nth(maximum_chars).is_some())
 }
 
 /// Learned exact surface pieces plus complete one-byte fallback.
@@ -341,9 +429,10 @@ impl SurfaceVocabulary {
 
     /// Encodes exact tokenizer surface pieces without boundary-control tokens.
     ///
-    /// Learned tokens never cross a tokenizer unit or morphology cut. Unknown
-    /// content is greedily matched against learned pieces and then falls back
-    /// to one exact byte per token.
+    /// Learned tokens may bridge one ordinary ASCII inter-word space into the
+    /// following word/number's first segment. Morphology cuts remain hard. All
+    /// other unit boundaries remain hard, and unmatched content falls back to
+    /// one exact byte per token.
     ///
     /// # Errors
     ///
@@ -413,7 +502,43 @@ impl SurfaceVocabulary {
         validate_units(raw, units)?;
         let length_start = lengths.len();
         push_parts(ids, lengths, SURFACE_BOS_ID, 0)?;
-        for unit in units {
+        let mut unit_index = 0_usize;
+        while unit_index < units.len() {
+            let unit = &units[unit_index];
+            if let Some(following) = units.get(unit_index.saturating_add(1)) {
+                if let Some(bridge) = prefix_bridge_range(
+                    raw,
+                    unit.span,
+                    unit.kind,
+                    following.span,
+                    following.kind,
+                    &following.cuts,
+                    use_morphology,
+                )? {
+                    self.encode_segment(raw, bridge.start, bridge.end, ids, lengths)?;
+                    if use_morphology {
+                        let mut left = bridge.end;
+                        for boundary in following
+                            .cuts
+                            .iter()
+                            .copied()
+                            .chain(std::iter::once(following.span.end))
+                        {
+                            let right = usize::try_from(boundary).map_err(|_| {
+                                TokenizerError::LengthOverflow("surface bridged segment end")
+                            })?;
+                            if right <= left {
+                                continue;
+                            }
+                            self.encode_segment(raw, left, right, ids, lengths)?;
+                            left = right;
+                        }
+                    }
+                    unit_index = unit_index.saturating_add(2);
+                    continue;
+                }
+            }
+
             let start = usize::try_from(unit.span.start)
                 .map_err(|_| TokenizerError::LengthOverflow("surface unit start"))?;
             if use_morphology {
@@ -434,6 +559,7 @@ impl SurfaceVocabulary {
                     .map_err(|_| TokenizerError::LengthOverflow("surface unit end"))?;
                 self.encode_segment(raw, start, end, ids, lengths)?;
             }
+            unit_index = unit_index.saturating_add(1);
         }
         if newline {
             push_parts(ids, lengths, SURFACE_BYTE_BASE_ID + u32::from(b'\n'), 1)?;
@@ -592,20 +718,48 @@ impl SurfaceVocabulary {
             .ok_or(TokenizerError::InvalidTrainingEncoding(
                 "flat surface encode range is invalid",
             ))?;
-        for unit in selected {
-            let bytes = crate::unit_bytes(raw, unit.span)?;
-            let should_split =
-                unit.status == crate::TokenStatus::Code || unit.mode == crate::TokenMode::Opaque;
-            let requires_split = if should_split && unit.mode == crate::TokenMode::Opaque {
-                bytes.len() > maximum_chars
-            } else if should_split && bytes.len() > maximum_chars {
-                let text =
-                    std::str::from_utf8(bytes).map_err(|_| TokenizerError::InvalidUtf8Unit)?;
-                text.chars().nth(maximum_chars).is_some()
-            } else {
-                false
-            };
-            if requires_split {
+        let mut unit_index = 0_usize;
+        while unit_index < selected.len() {
+            let unit = &selected[unit_index];
+            if let Some(following) = selected.get(unit_index.saturating_add(1)) {
+                if !flat_unit_requires_split(raw, following, maximum_chars)? {
+                    let following_cuts = following.cuts(cuts)?;
+                    if let Some(bridge) = prefix_bridge_range(
+                        raw,
+                        unit.span,
+                        unit.kind,
+                        following.span,
+                        following.kind,
+                        following_cuts,
+                        use_morphology,
+                    )? {
+                        self.encode_segment(raw, bridge.start, bridge.end, ids, lengths)?;
+                        if use_morphology {
+                            let mut left = bridge.end;
+                            for boundary in following_cuts
+                                .iter()
+                                .copied()
+                                .chain(std::iter::once(following.span.end))
+                            {
+                                let right = usize::try_from(boundary).map_err(|_| {
+                                    TokenizerError::LengthOverflow(
+                                        "flat surface bridged segment end",
+                                    )
+                                })?;
+                                if right <= left {
+                                    continue;
+                                }
+                                self.encode_segment(raw, left, right, ids, lengths)?;
+                                left = right;
+                            }
+                        }
+                        unit_index = unit_index.saturating_add(2);
+                        continue;
+                    }
+                }
+            }
+
+            if flat_unit_requires_split(raw, unit, maximum_chars)? {
                 for span in crate::chunk_span(
                     raw,
                     unit.span,
@@ -618,6 +772,7 @@ impl SurfaceVocabulary {
                         .map_err(|_| TokenizerError::LengthOverflow("flat surface chunk end"))?;
                     self.encode_segment(raw, start, end, ids, lengths)?;
                 }
+                unit_index = unit_index.saturating_add(1);
                 continue;
             }
             let start = usize::try_from(unit.span.start)
@@ -640,6 +795,7 @@ impl SurfaceVocabulary {
                     .map_err(|_| TokenizerError::LengthOverflow("flat surface unit end"))?;
                 self.encode_segment(raw, start, end, ids, lengths)?;
             }
+            unit_index = unit_index.saturating_add(1);
         }
         Ok(())
     }
@@ -1001,6 +1157,97 @@ mod tests {
         assert!(morphology_aware.ids.len() > ablated.ids.len());
         assert_eq!(vocabulary.decode_ids(&ablated.ids)?, b"gidicem");
         assert_eq!(vocabulary.decode_ids(&morphology_aware.ids)?, b"gidicem");
+        Ok(())
+    }
+
+    #[test]
+    fn ordinary_space_can_prefix_the_following_morphology_segment(
+    ) -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize(b"gidicem gidicem".to_vec())?;
+        assert!(!document.units()[0].cuts.is_empty());
+        assert!(!document.units()[2].cuts.is_empty());
+
+        let mut trainer = SurfaceVocabularyTrainer::new(4096)?;
+        trainer.observe(&document)?;
+        let vocabulary = trainer.finish(512)?;
+        assert!(vocabulary.id_for_piece(b" gid").is_some());
+        assert!(vocabulary.id_for_piece(b" gidice").is_none());
+
+        let encoded = vocabulary.encode_document(&document, false)?;
+        let bridge_id = id(vocabulary.id_for_piece(b" gid").expect("prefix piece"))?;
+        assert!(encoded.ids.contains(&bridge_id));
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, b"gidicem gidicem");
+        Ok(())
+    }
+
+    #[test]
+    fn utf8_word_prefix_bridge_is_one_exact_learned_token_in_rich_and_flat_paths(
+    ) -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let raw = "x Россия".as_bytes().to_vec();
+        let document = tokenizer.tokenize(raw.clone())?;
+        let vocabulary = SurfaceVocabulary::from_ranked(vec![" Россия".as_bytes().to_vec()])?;
+        let bridge_id = id(vocabulary.id_for_piece(" Россия".as_bytes()).expect("prefix piece"))?;
+
+        let rich = vocabulary.encode_document(&document, false)?;
+        assert_eq!(rich.lengths, vec![0, 1, 13, 0]);
+        assert_eq!(rich.ids[2], bridge_id);
+        assert_eq!(vocabulary.decode_ids(&rich.ids)?, raw);
+
+        let flat = tokenizer.encode_surface_batch(&[raw.clone()], &[false], &vocabulary, 1, true)?;
+        assert_eq!(flat.ids, rich.ids);
+        assert_eq!(flat.lengths, rich.lengths);
+        assert_eq!(flat.document_offsets, vec![0, 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_space_runs_stay_standalone_and_can_be_learned() -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize(b"a        b".to_vec())?;
+        let mut trainer = SurfaceVocabularyTrainer::new(4096)?;
+        trainer.observe(&document)?;
+        let vocabulary = trainer.finish(512)?;
+        assert!(vocabulary.id_for_piece(b"        ").is_some());
+        assert!(vocabulary.id_for_piece(b"        b").is_none());
+        assert_eq!(vocabulary.decode_ids(&vocabulary.encode_document(&document, false)?.ids)?, b"a        b");
+        Ok(())
+    }
+
+    #[test]
+    fn trainer_learns_frequent_non_ascii_unicode_scalars() -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize("Россия Россия 中文 中文".as_bytes().to_vec())?;
+        let mut trainer = SurfaceVocabularyTrainer::new(4096)?;
+        trainer.observe(&document)?;
+        let vocabulary = trainer.finish(512)?;
+        for scalar in ["Р", "о", "с", "и", "я", "中", "文"] {
+            assert!(
+                vocabulary.id_for_piece(scalar.as_bytes()).is_some(),
+                "missing learned scalar {scalar}"
+            );
+        }
+        assert_eq!(
+            vocabulary.decode_ids(&vocabulary.encode_document(&document, false)?.ids)?,
+            document.raw()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn valid_foreign_utf8_has_no_unknown_token_and_byte_fallback_is_exact(
+    ) -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let raw = "Россия 中文".as_bytes().to_vec();
+        let document = tokenizer.tokenize(raw.clone())?;
+        let vocabulary = SurfaceVocabulary::from_ranked(Vec::new())?;
+        let encoded = vocabulary.encode_document(&document, false)?;
+        for token in &encoded.ids[1..encoded.ids.len().saturating_sub(1)] {
+            let token = u32::from(*token);
+            assert!((SURFACE_BYTE_BASE_ID..super::SURFACE_ENTRY_BASE_ID).contains(&token));
+        }
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, raw);
         Ok(())
     }
 

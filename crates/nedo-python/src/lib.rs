@@ -782,7 +782,14 @@ fn inspect_surface(
         .map(|(index, unit)| unit_json(index, unit, raw))
         .collect::<Result<Vec<_>, _>>()?;
     let tokens = surface_tokens_json(&document, &encoded.ids, &encoded.lengths, raw)?;
-    let summary = surface_summary(&document, &encoded.lengths, raw, vocabulary, decoded == raw);
+    let summary = surface_summary(
+        &document,
+        &encoded.ids,
+        &encoded.lengths,
+        raw,
+        vocabulary,
+        decoded == raw,
+    );
     Ok(json!({"schema": 1, "tokens": tokens, "units": units, "summary": summary}))
 }
 
@@ -856,6 +863,7 @@ fn advance_unit_cursor(
 
 fn surface_summary(
     document: &nedo_tokenizer::TokenizedDocument,
+    ids: &[u16],
     lengths: &[u8],
     raw: &[u8],
     vocabulary: &SurfaceVocabulary,
@@ -874,12 +882,36 @@ fn surface_summary(
             .count()
     };
     let content_tokens = lengths.iter().filter(|length| **length > 0).count();
+    let byte_fallback_tokens = ids
+        .iter()
+        .zip(lengths)
+        .filter(|(id, length)| {
+            **length > 0
+                && (SURFACE_BYTE_BASE_ID..SURFACE_ENTRY_BASE_ID).contains(&u32::from(**id))
+        })
+        .count();
+    let byte_fallback_bytes = ids
+        .iter()
+        .zip(lengths)
+        .filter(|(id, _)| {
+            (SURFACE_BYTE_BASE_ID..SURFACE_ENTRY_BASE_ID).contains(&u32::from(**id))
+        })
+        .map(|(_, length)| usize::from(*length))
+        .sum::<usize>();
+    let learned_tokens = ids
+        .iter()
+        .zip(lengths)
+        .filter(|(id, length)| **length > 0 && u32::from(**id) >= SURFACE_ENTRY_BASE_ID)
+        .count();
     let characters = core::str::from_utf8(raw).map_or(0, |text| text.chars().count());
     json!({
         "bytes": raw.len(),
         "characters": characters,
         "words": lexical_words,
         "content_tokens": content_tokens,
+        "learned_tokens": learned_tokens,
+        "byte_fallback_tokens": byte_fallback_tokens,
+        "byte_fallback_bytes": byte_fallback_bytes,
         "special_tokens": lengths.len().saturating_sub(content_tokens),
         "all_tokens": lengths.len(),
         "units": document.units().len(),
