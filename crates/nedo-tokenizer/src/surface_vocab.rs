@@ -22,7 +22,9 @@ pub const SURFACE_BYTE_BASE_ID: u32 = 3;
 /// First learned surface-piece ID.
 pub const SURFACE_ENTRY_BASE_ID: u32 = SURFACE_BYTE_BASE_ID + 256;
 
-const SURFACE_MAGIC: &[u8; 8] = b"NDSRF001";
+const SURFACE_GREEDY_MAGIC: &[u8; 8] = b"NDSRF001";
+const SURFACE_BPE_MAGIC: &[u8; 8] = b"NDSRF002";
+const SURFACE_LEXICAL_BPE_MAGIC: &[u8; 8] = b"NDSRF003";
 const MAX_LEARNED_PIECE_BYTES: usize = 96;
 const NO_TRIE_NODE: u32 = u32::MAX;
 const TRIE_LINEAR_EDGE_LIMIT: usize = 8;
@@ -56,6 +58,17 @@ const fn trie_edge_next(edge: TrieEdge) -> u32 {
 struct TrieBuilderNode {
     terminal_id: u16,
     children: BTreeMap<u8, usize>,
+}
+
+/// Surface segmentation algorithm encoded by the vocabulary asset.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SurfaceVocabularyKind {
+    /// Legacy v0.2 longest-prefix trie segmentation.
+    GreedyLongest,
+    /// GPT/Tiktoken-style byte-pair encoding with morphology cuts as hard boundaries.
+    ByteBpe,
+    /// GPT/Tiktoken-style byte-pair encoding at lexical/scanner boundaries only.
+    LexicalByteBpe,
 }
 
 /// Bounded deterministic frequency trainer for learned surface pieces.
@@ -291,9 +304,127 @@ fn flat_unit_requires_split(
     Ok(text.chars().nth(maximum_chars).is_some())
 }
 
+/// Returns the exact byte spans inside which surface BPE merges are allowed.
+///
+/// Turkish morphology cuts stay hard boundaries. One ordinary ASCII inter-word
+/// space may prefix the following word/number's first morphology segment. All
+/// other tokenizer-unit boundaries remain hard. The spans are contiguous and
+/// cover the original document exactly.
+///
+/// # Errors
+///
+/// Returns an error if document spans or offsets are invalid.
+pub fn surface_bpe_segments(
+    document: &TokenizedDocument,
+    use_morphology: bool,
+) -> Result<Vec<ByteSpan>, TokenizerError> {
+    document.validate()?;
+    surface_bpe_segments_from_units(document.raw(), document.units(), use_morphology)
+}
+
+fn surface_bpe_segments_from_units(
+    raw: &[u8],
+    units: &[TokenizedUnit],
+    use_morphology: bool,
+) -> Result<Vec<ByteSpan>, TokenizerError> {
+    validate_units(raw, units)?;
+    let mut segments = Vec::with_capacity(units.len().saturating_mul(2));
+    let mut unit_index = 0_usize;
+    while unit_index < units.len() {
+        let unit = &units[unit_index];
+        if let Some(following) = units.get(unit_index.saturating_add(1)) {
+            if let Some(bridge) = prefix_bridge_range(
+                raw,
+                unit.span,
+                unit.kind,
+                following.span,
+                following.kind,
+                &following.cuts,
+                use_morphology,
+            )? {
+                segments.push(ByteSpan {
+                    start: u64::try_from(bridge.start).map_err(|_| {
+                        TokenizerError::LengthOverflow("surface BPE segment start")
+                    })?,
+                    end: u64::try_from(bridge.end).map_err(|_| {
+                        TokenizerError::LengthOverflow("surface BPE segment end")
+                    })?,
+                });
+                if use_morphology {
+                    let mut left = u64::try_from(bridge.end).map_err(|_| {
+                        TokenizerError::LengthOverflow("surface BPE bridged remainder")
+                    })?;
+                    for boundary in following
+                        .cuts
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(following.span.end))
+                    {
+                        if boundary > left {
+                            segments.push(ByteSpan {
+                                start: left,
+                                end: boundary,
+                            });
+                            left = boundary;
+                        }
+                    }
+                }
+                unit_index = unit_index.saturating_add(2);
+                continue;
+            }
+        }
+
+        if use_morphology {
+            let mut left = unit.span.start;
+            for boundary in unit
+                .cuts
+                .iter()
+                .copied()
+                .chain(std::iter::once(unit.span.end))
+            {
+                if boundary > left {
+                    segments.push(ByteSpan {
+                        start: left,
+                        end: boundary,
+                    });
+                    left = boundary;
+                }
+            }
+        } else {
+            segments.push(unit.span);
+        }
+        unit_index = unit_index.saturating_add(1);
+    }
+
+    let mut expected = 0_u64;
+    for (index, segment) in segments.iter().enumerate() {
+        if segment.start != expected || segment.end <= segment.start {
+            return Err(TokenizerError::InvalidUnitCoverage {
+                index,
+                expected,
+                start: segment.start,
+                end: segment.end,
+            });
+        }
+        expected = segment.end;
+    }
+    let document_end = u64::try_from(raw.len())
+        .map_err(|_| TokenizerError::LengthOverflow("surface BPE document length"))?;
+    if expected != document_end {
+        return Err(TokenizerError::InvalidUnitCoverage {
+            index: segments.len(),
+            expected,
+            start: expected,
+            end: document_end,
+        });
+    }
+    Ok(segments)
+}
+
 /// Learned exact surface pieces plus complete one-byte fallback.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceVocabulary {
+    kind: SurfaceVocabularyKind,
     entries: Vec<Vec<u8>>,
     lookup: HashMap<Vec<u8>, u32>,
     trie_root: [u32; 256],
@@ -308,6 +439,38 @@ impl SurfaceVocabulary {
     ///
     /// Returns an error for empty, duplicate, oversized, or overflowing entries.
     pub fn from_ranked(entries: Vec<Vec<u8>>) -> Result<Self, TokenizerError> {
+        Self::from_entries(entries, SurfaceVocabularyKind::GreedyLongest)
+    }
+
+    /// Builds a byte-BPE vocabulary whose entry order is the merge priority.
+    ///
+    /// Every learned entry must be a valid merge of two tokens that are already
+    /// available as a raw byte or an earlier learned entry. This invariant is
+    /// the same rank-order contract relied on by Tiktoken-style BPE encoders.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid merge order, duplicate/oversized entries, or overflow.
+    pub fn from_bpe_ranked(entries: Vec<Vec<u8>>) -> Result<Self, TokenizerError> {
+        validate_bpe_merge_order(&entries)?;
+        Self::from_entries(entries, SurfaceVocabularyKind::ByteBpe)
+    }
+
+    /// Builds a lexical-boundary byte-BPE vocabulary. Morphology remains available
+    /// as analysis metadata but does not force final LM token boundaries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid merge order, duplicate/oversized entries, or overflow.
+    pub fn from_lexical_bpe_ranked(entries: Vec<Vec<u8>>) -> Result<Self, TokenizerError> {
+        validate_bpe_merge_order(&entries)?;
+        Self::from_entries(entries, SurfaceVocabularyKind::LexicalByteBpe)
+    }
+
+    fn from_entries(
+        entries: Vec<Vec<u8>>,
+        kind: SurfaceVocabularyKind,
+    ) -> Result<Self, TokenizerError> {
         if entries.len()
             > usize::from(u16::MAX)
                 .saturating_add(1)
@@ -383,12 +546,19 @@ impl SurfaceVocabulary {
             });
         }
         Ok(Self {
+            kind,
             entries,
             lookup,
             trie_root,
             trie_nodes,
             trie_edges,
         })
+    }
+
+    /// Segmentation algorithm encoded by this asset.
+    #[must_use]
+    pub const fn kind(&self) -> SurfaceVocabularyKind {
+        self.kind
     }
 
     /// Total embedding vocabulary size including specials and byte fallback.
@@ -429,10 +599,10 @@ impl SurfaceVocabulary {
 
     /// Encodes exact tokenizer surface pieces without boundary-control tokens.
     ///
-    /// Learned tokens may bridge one ordinary ASCII inter-word space into the
-    /// following word/number's first segment. Morphology cuts remain hard. All
-    /// other unit boundaries remain hard, and unmatched content falls back to
-    /// one exact byte per token.
+    /// The exact boundary policy is encoded by the vocabulary asset. Legacy and
+    /// morphology-BPE assets preserve morphology cuts; lexical-BPE keeps scanner
+    /// boundaries while allowing one ordinary ASCII inter-word space to prefix
+    /// the following word/number. Unmatched content always falls back to exact bytes.
     ///
     /// # Errors
     ///
@@ -502,64 +672,14 @@ impl SurfaceVocabulary {
         validate_units(raw, units)?;
         let length_start = lengths.len();
         push_parts(ids, lengths, SURFACE_BOS_ID, 0)?;
-        let mut unit_index = 0_usize;
-        while unit_index < units.len() {
-            let unit = &units[unit_index];
-            if let Some(following) = units.get(unit_index.saturating_add(1)) {
-                if let Some(bridge) = prefix_bridge_range(
-                    raw,
-                    unit.span,
-                    unit.kind,
-                    following.span,
-                    following.kind,
-                    &following.cuts,
-                    use_morphology,
-                )? {
-                    self.encode_segment(raw, bridge.start, bridge.end, ids, lengths)?;
-                    if use_morphology {
-                        let mut left = bridge.end;
-                        for boundary in following
-                            .cuts
-                            .iter()
-                            .copied()
-                            .chain(std::iter::once(following.span.end))
-                        {
-                            let right = usize::try_from(boundary).map_err(|_| {
-                                TokenizerError::LengthOverflow("surface bridged segment end")
-                            })?;
-                            if right <= left {
-                                continue;
-                            }
-                            self.encode_segment(raw, left, right, ids, lengths)?;
-                            left = right;
-                        }
-                    }
-                    unit_index = unit_index.saturating_add(2);
-                    continue;
-                }
-            }
-
-            let start = usize::try_from(unit.span.start)
-                .map_err(|_| TokenizerError::LengthOverflow("surface unit start"))?;
-            if use_morphology {
-                let mut left = start;
-                for boundary in unit
-                    .cuts
-                    .iter()
-                    .copied()
-                    .chain(std::iter::once(unit.span.end))
-                {
-                    let right = usize::try_from(boundary)
-                        .map_err(|_| TokenizerError::LengthOverflow("surface segment end"))?;
-                    self.encode_segment(raw, left, right, ids, lengths)?;
-                    left = right;
-                }
-            } else {
-                let end = usize::try_from(unit.span.end)
-                    .map_err(|_| TokenizerError::LengthOverflow("surface unit end"))?;
-                self.encode_segment(raw, start, end, ids, lengths)?;
-            }
-            unit_index = unit_index.saturating_add(1);
+        let use_morphology = use_morphology
+            && self.kind != SurfaceVocabularyKind::LexicalByteBpe;
+        for segment in surface_bpe_segments_from_units(raw, units, use_morphology)? {
+            let start = usize::try_from(segment.start)
+                .map_err(|_| TokenizerError::LengthOverflow("surface segment start"))?;
+            let end = usize::try_from(segment.end)
+                .map_err(|_| TokenizerError::LengthOverflow("surface segment end"))?;
+            self.encode_segment(raw, start, end, ids, lengths)?;
         }
         if newline {
             push_parts(ids, lengths, SURFACE_BYTE_BASE_ID + u32::from(b'\n'), 1)?;
@@ -718,6 +838,8 @@ impl SurfaceVocabulary {
             .ok_or(TokenizerError::InvalidTrainingEncoding(
                 "flat surface encode range is invalid",
             ))?;
+        let use_morphology = use_morphology
+            && self.kind != SurfaceVocabularyKind::LexicalByteBpe;
         let mut unit_index = 0_usize;
         while unit_index < selected.len() {
             let unit = &selected[unit_index];
@@ -849,7 +971,11 @@ impl SurfaceVocabulary {
             payload.extend_from_slice(entry);
         }
         let mut output = Vec::with_capacity(44 + payload.len());
-        output.extend_from_slice(SURFACE_MAGIC);
+        output.extend_from_slice(match self.kind {
+            SurfaceVocabularyKind::GreedyLongest => SURFACE_GREEDY_MAGIC,
+            SurfaceVocabularyKind::ByteBpe => SURFACE_BPE_MAGIC,
+            SurfaceVocabularyKind::LexicalByteBpe => SURFACE_LEXICAL_BPE_MAGIC,
+        });
         output.extend_from_slice(
             &u32::try_from(self.entries.len())
                 .map_err(|_| TokenizerError::LengthOverflow("surface entry count"))?
@@ -866,11 +992,23 @@ impl SurfaceVocabulary {
     ///
     /// Returns an error for malformed identity, checksum, lengths, or entries.
     pub fn from_bytes(input: &[u8]) -> Result<Self, TokenizerError> {
-        if input.len() < 44 || input.get(..8) != Some(SURFACE_MAGIC) {
+        if input.len() < 44 {
             return Err(TokenizerError::InvalidVocabulary(
                 "bad surface vocabulary header",
             ));
         }
+        let kind = match input.get(..8) {
+            Some(value) if value == SURFACE_GREEDY_MAGIC => SurfaceVocabularyKind::GreedyLongest,
+            Some(value) if value == SURFACE_BPE_MAGIC => SurfaceVocabularyKind::ByteBpe,
+            Some(value) if value == SURFACE_LEXICAL_BPE_MAGIC => {
+                SurfaceVocabularyKind::LexicalByteBpe
+            }
+            _ => {
+                return Err(TokenizerError::InvalidVocabulary(
+                    "bad surface vocabulary header",
+                ));
+            }
+        };
         let count = u32::from_le_bytes(
             input[8..12]
                 .try_into()
@@ -918,7 +1056,11 @@ impl SurfaceVocabulary {
                 "trailing surface vocabulary bytes",
             ));
         }
-        Self::from_ranked(entries)
+        match kind {
+            SurfaceVocabularyKind::GreedyLongest => Self::from_ranked(entries),
+            SurfaceVocabularyKind::ByteBpe => Self::from_bpe_ranked(entries),
+            SurfaceVocabularyKind::LexicalByteBpe => Self::from_lexical_bpe_ranked(entries),
+        }
     }
 
     #[inline(always)]
@@ -942,6 +1084,24 @@ impl SurfaceVocabulary {
     }
 
     fn encode_segment(
+        &self,
+        raw: &[u8],
+        start: usize,
+        end: usize,
+        ids: &mut Vec<u16>,
+        lengths: &mut Vec<u8>,
+    ) -> Result<(), TokenizerError> {
+        match self.kind {
+            SurfaceVocabularyKind::GreedyLongest => {
+                self.encode_segment_greedy(raw, start, end, ids, lengths)
+            }
+            SurfaceVocabularyKind::ByteBpe | SurfaceVocabularyKind::LexicalByteBpe => {
+                self.encode_segment_bpe(raw, start, end, ids, lengths)
+            }
+        }
+    }
+
+    fn encode_segment_greedy(
         &self,
         raw: &[u8],
         start: usize,
@@ -996,6 +1156,119 @@ impl SurfaceVocabulary {
         }
         Ok(())
     }
+
+    fn encode_segment_bpe(
+        &self,
+        raw: &[u8],
+        start: usize,
+        end: usize,
+        ids: &mut Vec<u16>,
+        lengths: &mut Vec<u8>,
+    ) -> Result<(), TokenizerError> {
+        if start > end || end > raw.len() {
+            return Err(TokenizerError::UnitOutsideDocument);
+        }
+        if start == end {
+            return Ok(());
+        }
+        let piece = raw
+            .get(start..end)
+            .ok_or(TokenizerError::UnitOutsideDocument)?;
+        if piece.len() == 1 {
+            return push_parts(
+                ids,
+                lengths,
+                SURFACE_BYTE_BASE_ID + u32::from(piece[0]),
+                1,
+            );
+        }
+
+        // Boundaries delimit the current byte tokens. Removing one boundary merges
+        // the adjacent pair. The learned-entry ID order is the merge priority.
+        let mut boundaries = (0..=piece.len()).collect::<Vec<_>>();
+        loop {
+            let mut best_rank = u32::MAX;
+            let mut best_boundary = None;
+            for index in 0..boundaries.len().saturating_sub(2) {
+                let left = boundaries[index];
+                let right = boundaries[index + 2];
+                if let Some(id) = self.id_for_piece(&piece[left..right]) {
+                    let rank = id.saturating_sub(SURFACE_ENTRY_BASE_ID);
+                    if rank < best_rank {
+                        best_rank = rank;
+                        best_boundary = Some(index + 1);
+                    }
+                }
+            }
+            let Some(boundary) = best_boundary else {
+                break;
+            };
+            boundaries.remove(boundary);
+        }
+
+        for window in boundaries.windows(2) {
+            let left = window[0];
+            let right = window[1];
+            let token = &piece[left..right];
+            if token.len() == 1 {
+                push_parts(
+                    ids,
+                    lengths,
+                    SURFACE_BYTE_BASE_ID + u32::from(token[0]),
+                    1,
+                )?;
+            } else {
+                let id = self.id_for_piece(token).ok_or(
+                    TokenizerError::InvalidVocabulary(
+                        "surface BPE merge produced a token missing from the vocabulary",
+                    ),
+                )?;
+                push_parts(
+                    ids,
+                    lengths,
+                    id,
+                    u8::try_from(token.len()).map_err(|_| {
+                        TokenizerError::LengthOverflow("surface BPE token length")
+                    })?,
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_bpe_merge_order(entries: &[Vec<u8>]) -> Result<(), TokenizerError> {
+    let mut available = HashSet::<Vec<u8>>::with_capacity(entries.len().saturating_mul(2));
+    for (rank, entry) in entries.iter().enumerate() {
+        if entry.len() < 2 {
+            return Err(TokenizerError::InvalidVocabulary(
+                "surface BPE learned entries must contain at least two bytes",
+            ));
+        }
+        let mut valid = false;
+        for split in 1..entry.len() {
+            let left = &entry[..split];
+            let right = &entry[split..];
+            let left_available = left.len() == 1 || available.contains(left);
+            let right_available = right.len() == 1 || available.contains(right);
+            if left_available && right_available {
+                valid = true;
+                break;
+            }
+        }
+        if !valid {
+            let _ = rank;
+            return Err(TokenizerError::InvalidVocabulary(
+                "surface BPE entry cannot be formed from earlier merge ranks",
+            ));
+        }
+        if !available.insert(entry.clone()) {
+            return Err(TokenizerError::InvalidVocabulary(
+                "surface BPE entries must be unique",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_flat_units(
@@ -1248,6 +1521,73 @@ mod tests {
             assert!((SURFACE_BYTE_BASE_ID..super::SURFACE_ENTRY_BASE_ID).contains(&token));
         }
         assert_eq!(vocabulary.decode_ids(&encoded.ids)?, raw);
+        Ok(())
+    }
+
+    #[test]
+    fn byte_bpe_uses_merge_rank_and_round_trips() -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize(b"abcd".to_vec())?;
+        let vocabulary = SurfaceVocabulary::from_bpe_ranked(vec![
+            b"ab".to_vec(),
+            b"cd".to_vec(),
+            b"abcd".to_vec(),
+        ])?;
+        assert_eq!(vocabulary.kind(), super::SurfaceVocabularyKind::ByteBpe);
+        let encoded = vocabulary.encode_document(&document, false)?;
+        assert_eq!(encoded.lengths, vec![0, 4, 0]);
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, b"abcd");
+        let reloaded = SurfaceVocabulary::from_bytes(&vocabulary.to_bytes()?)?;
+        assert_eq!(reloaded, vocabulary);
+        assert_eq!(reloaded.kind(), super::SurfaceVocabularyKind::ByteBpe);
+        Ok(())
+    }
+
+    #[test]
+    fn byte_bpe_rejects_out_of_order_merges() {
+        let error = SurfaceVocabulary::from_bpe_ranked(vec![
+            b"abcd".to_vec(),
+            b"ab".to_vec(),
+            b"cd".to_vec(),
+        ])
+        .expect_err("a merge must be constructible from earlier ranks");
+        assert!(matches!(error, crate::TokenizerError::InvalidVocabulary(_)));
+    }
+
+    #[test]
+    fn byte_bpe_can_merge_space_into_following_word() -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize(b"a hava".to_vec())?;
+        let vocabulary = SurfaceVocabulary::from_bpe_ranked(vec![
+            b" h".to_vec(),
+            b" ha".to_vec(),
+            b" hav".to_vec(),
+            b" hava".to_vec(),
+        ])?;
+        let encoded = vocabulary.encode_document(&document, false)?;
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, b"a hava");
+        assert!(encoded.lengths.iter().any(|length| *length == 5));
+        Ok(())
+    }
+
+    #[test]
+    fn lexical_byte_bpe_ignores_morphology_cuts_but_round_trips() -> Result<(), crate::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let document = tokenizer.tokenize(b"gidicem".to_vec())?;
+        assert!(!document.units()[0].cuts.is_empty());
+        let vocabulary = SurfaceVocabulary::from_lexical_bpe_ranked(vec![
+            b"gi".to_vec(),
+            b"gid".to_vec(),
+            b"gidi".to_vec(),
+            b"gidic".to_vec(),
+            b"gidice".to_vec(),
+            b"gidicem".to_vec(),
+        ])?;
+        let encoded = vocabulary.encode_document(&document, false)?;
+        assert_eq!(encoded.lengths, vec![0, 7, 0]);
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, b"gidicem");
+        let reloaded = SurfaceVocabulary::from_bytes(&vocabulary.to_bytes()?)?;
+        assert_eq!(reloaded.kind(), super::SurfaceVocabularyKind::LexicalByteBpe);
         Ok(())
     }
 

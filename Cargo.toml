@@ -6,6 +6,7 @@ members = [
   "crates/nedo-morph-bundle",
   "crates/nedo-tokenizer",
   "crates/nedo-python",
+  "crates/nedo-vocab",
 ]
 
 [workspace.package]

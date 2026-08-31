@@ -1,0 +1,21 @@
+[package]
+name = "nedo-vocab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+
+[[bin]]
+name = "nedo-surface-segment"
+path = "src/main.rs"
+
+[[bin]]
+name = "nedo-surface-benchmark"
+path = "src/benchmark.rs"
+
+[dependencies]
+nedo-tokenizer = { path = "../nedo-tokenizer" }
+
+[lints]
+workspace = true

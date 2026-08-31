@@ -68,8 +68,8 @@ pub use sharded_surface::{
     merge_surface_shards, ShardedSurfaceEncoder, ShardedSurfaceRuntimeCache, SurfaceShardBatch,
 };
 pub use surface_vocab::{
-    SurfaceVocabulary, SurfaceVocabularyTrainer, SURFACE_BOS_ID, SURFACE_BYTE_BASE_ID,
-    SURFACE_ENTRY_BASE_ID, SURFACE_EOS_ID, SURFACE_PAD_ID,
+    surface_bpe_segments, SurfaceVocabulary, SurfaceVocabularyKind, SurfaceVocabularyTrainer,
+    SURFACE_BOS_ID, SURFACE_BYTE_BASE_ID, SURFACE_ENTRY_BASE_ID, SURFACE_EOS_ID, SURFACE_PAD_ID,
 };
 pub use training::{
     encode_byte_training_document, TrainingBatch, TrainingEncoding, TrainingEncodingOptions,
