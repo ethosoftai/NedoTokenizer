@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "nedo-surface-benchmark"
 path = "src/benchmark.rs"
 
+[[bin]]
+name = "nedo-surface-parity"
+path = "src/parity.rs"
+
 [dependencies]
 nedo-tokenizer = { path = "../nedo-tokenizer" }
 
