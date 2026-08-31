@@ -932,18 +932,12 @@ fn flush_segment(
         let sets = owned_sets.iter().map(AsRef::as_ref).collect::<Vec<_>>();
         apply_sets(tokenizer, raw, units, cuts, indices, &sets, cache)?;
     }
-    let program = capture_segment_program(
-        raw,
-        units,
-        cuts,
-        indices,
-        vocabulary,
-        use_morphology,
-        maximum_chars,
-    )?;
-    let program =
-        insert_surface_program(cache, SURFACE_PROGRAM_TURKISH, fingerprint, exact, program);
-    programs.push(program_use(indices, program)?);
+    // Surface tokenization is left-context sensitive: one ASCII space immediately
+    // before the first word may merge into that word's root. The cached sentence
+    // program starts at the first non-whitespace unit, so caching final IDs here
+    // would silently drop that bridge. Cache morphology analysis only; final IDs
+    // are always produced from the real document unit stream below.
+    let _ = (programs, vocabulary, use_morphology, maximum_chars, fingerprint, exact);
     indices.clear();
     Ok(())
 }

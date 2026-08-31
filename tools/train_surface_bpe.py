@@ -16,6 +16,7 @@ import tiktoken
 SEGMENT_MAGIC = b"NSEG0001"
 SURFACE_MORPH_MAGIC = b"NDSRF002"
 SURFACE_LEXICAL_MAGIC = b"NDSRF003"
+SURFACE_ROOT_SUFFIX_MAGIC = b"NDSRF004"
 SURFACE_FIXED_IDS = 259
 BYTE_COUNT = 256
 DEFAULT_TOTAL_VOCAB = 32_000
@@ -30,7 +31,7 @@ def parse_args():
     p.add_argument("--min-frequency", type=int, default=2)
     p.add_argument("--max-token-bytes", type=int, default=DEFAULT_MAX_TOKEN_BYTES)
     p.add_argument("--expected-input-sha256")
-    p.add_argument("--boundary-policy", choices=["morphology", "lexical"], default="morphology")
+    p.add_argument("--boundary-policy", choices=["morphology", "root-suffix", "lexical"], default="morphology")
     return p.parse_args()
 
 
@@ -276,7 +277,11 @@ def main():
     validate_merge_order(entries, args.max_token_bytes)
 
     vocab_path = out / "surface-vocab-32k-nedo-bpe.bin"
-    magic = SURFACE_MORPH_MAGIC if args.boundary_policy == "morphology" else SURFACE_LEXICAL_MAGIC
+    magic = {
+        "morphology": SURFACE_MORPH_MAGIC,
+        "root-suffix": SURFACE_ROOT_SUFFIX_MAGIC,
+        "lexical": SURFACE_LEXICAL_MAGIC,
+    }[args.boundary_policy]
     vocab_sha, vocab_bytes, payload_sha = write_surface_vocab(vocab_path, entries, magic)
     tiktoken_path = out / "surface-vocab-32k-nedo-bpe.tiktoken"
     write_tiktoken(tiktoken_path, entries)

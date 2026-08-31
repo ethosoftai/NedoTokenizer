@@ -3,7 +3,9 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-use nedo_tokenizer::{surface_bpe_segments, Tokenizer, TokenizerConfig};
+use nedo_tokenizer::{
+    surface_bpe_root_suffix_segments, surface_bpe_segments, Tokenizer, TokenizerConfig,
+};
 
 const INPUT_MAGIC: &[u8; 8] = b"MVOCBIN1";
 const SEGMENT_MAGIC: &[u8; 8] = b"NSEG0001";
@@ -47,11 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let eval_modulus = args[4].parse::<u64>()?;
     let split_seed = parse_u64(&args[5])?;
     let threads = args[6].parse::<usize>()?;
-    let use_morphology = match args[7].as_str() {
-        "morphology" => true,
-        "lexical" => false,
-        _ => return Err("boundary policy must be morphology or lexical".into()),
-    };
+    let boundary_policy = args[7].as_str();
+    if !matches!(boundary_policy, "morphology" | "root-suffix" | "lexical") {
+        return Err("boundary policy must be morphology, root-suffix, or lexical".into());
+    }
     if eval_modulus < 2 {
         return Err("eval modulus must be at least 2".into());
     }
@@ -103,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &mut train,
                 &mut batch,
                 threads,
-                use_morphology,
+                boundary_policy,
                 &mut stats,
             )?;
             batch_bytes = 0;
@@ -115,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut train,
             &mut batch,
             threads,
-            use_morphology,
+            boundary_policy,
             &mut stats,
         )?;
     }
@@ -136,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("sentinel_hex=1f");
     println!("eval_modulus={eval_modulus}");
     println!("split_seed={split_seed}");
-    println!("boundary_policy={}", if use_morphology { "morphology" } else { "lexical" });
+    println!("boundary_policy={boundary_policy}");
     Ok(())
 }
 
@@ -152,7 +153,7 @@ fn flush_train_batch(
     writer: &mut BufWriter<File>,
     batch: &mut Vec<Record>,
     threads: usize,
-    use_morphology: bool,
+    boundary_policy: &str,
     stats: &mut Stats,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let inputs = batch.iter().map(|record| record.raw.clone()).collect::<Vec<_>>();
@@ -161,7 +162,12 @@ fn flush_train_batch(
         return Err("tokenizer batch cardinality mismatch".into());
     }
     for (record, document) in batch.iter().zip(&documents) {
-        let spans = surface_bpe_segments(document, use_morphology)?;
+        let spans = match boundary_policy {
+            "morphology" => surface_bpe_segments(document, true)?,
+            "root-suffix" => surface_bpe_root_suffix_segments(document)?,
+            "lexical" => surface_bpe_segments(document, false)?,
+            _ => return Err("invalid boundary policy after validation".into()),
+        };
         let mut segmented = Vec::with_capacity(
             record
                 .raw

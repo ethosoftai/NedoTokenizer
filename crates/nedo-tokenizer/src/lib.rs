@@ -68,7 +68,8 @@ pub use sharded_surface::{
     merge_surface_shards, ShardedSurfaceEncoder, ShardedSurfaceRuntimeCache, SurfaceShardBatch,
 };
 pub use surface_vocab::{
-    surface_bpe_segments, SurfaceVocabulary, SurfaceVocabularyKind, SurfaceVocabularyTrainer,
+    surface_bpe_root_suffix_segments, surface_bpe_segments, SurfaceVocabulary,
+    SurfaceVocabularyKind, SurfaceVocabularyTrainer,
     SURFACE_BOS_ID, SURFACE_BYTE_BASE_ID, SURFACE_ENTRY_BASE_ID, SURFACE_EOS_ID, SURFACE_PAD_ID,
 };
 pub use training::{
@@ -4286,6 +4287,32 @@ mod tests {
         }
         assert_eq!(pieces, ["Ana", "nız", "ı", " öp", "e", "yim"]);
         assert_eq!(vocabulary.decode_ids(&encoded.ids)?, raw);
+        Ok(())
+    }
+
+    #[test]
+    fn production_flat_surface_ids_match_rich_reference_with_leading_spaces(
+    ) -> Result<(), super::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let vocabulary = SurfaceVocabulary::from_bytes(include_bytes!(
+            "../../../assets/surface-vocab.bin"
+        ))?;
+        let inputs = vec![
+            "Av. Mehmet geldi. I. BAŞVURUNUN ÖZETİ".as_bytes().to_vec(),
+            "Bir adam geldi. Mehmet eve geldi.".as_bytes().to_vec(),
+        ];
+        let flags = vec![false; inputs.len()];
+        let flat = tokenizer.encode_surface_batch(&inputs, &flags, &vocabulary, 1, true)?;
+        for (index, raw) in inputs.iter().enumerate() {
+            let document = tokenizer.tokenize(raw.clone())?;
+            let rich = vocabulary.encode_document(&document, false)?;
+            let start = usize::try_from(flat.document_offsets[index])
+                .map_err(|_| super::TokenizerError::LengthOverflow("test flat start"))?;
+            let end = usize::try_from(flat.document_offsets[index + 1])
+                .map_err(|_| super::TokenizerError::LengthOverflow("test flat end"))?;
+            assert_eq!(&flat.ids[start..end], rich.ids.as_slice());
+            assert_eq!(&flat.lengths[start..end], rich.lengths.as_slice());
+        }
         Ok(())
     }
 
