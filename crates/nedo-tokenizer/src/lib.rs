@@ -2619,34 +2619,19 @@ impl<'a> Tokenizer<'a> {
     ) -> Result<(), TokenizerError> {
         let mut cuts = Vec::new();
         let started = telemetry.then(std::time::Instant::now);
-        let surface_programs = flat_surface::apply_contextual_analysis(
-            self,
-            raw,
-            &mut units,
-            &mut cuts,
-            vocabulary,
-            use_morphology,
-            self.config.max_fallback_chars,
-            cache,
-        )?;
+        flat_surface::apply_contextual_analysis(self, raw, &mut units, &mut cuts, cache)?;
         if let Some(started) = started {
             cache.phase_analysis_ns = cache
                 .phase_analysis_ns
                 .saturating_add(started.elapsed().as_nanos());
         }
-        if !surface_programs.is_empty() {
-            return Err(TokenizerError::InvalidTrainingEncoding(
-                "Turkish surface ID programs must be empty before context-sensitive encoding",
-            ));
-        }
         let units =
             flat_surface::split_long_surface_units(raw, units, self.config.max_fallback_chars)?;
         let started = telemetry.then(std::time::Instant::now);
-        vocabulary.encode_flat_units_with_programs(
+        vocabulary.encode_flat_units(
             raw,
             &units,
             &cuts,
-            &surface_programs,
             self.config.max_fallback_chars,
             newline,
             use_morphology,

@@ -45,13 +45,6 @@ impl FlatSurfaceUnit {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct SurfaceProgramUse {
-    pub(crate) start_unit: usize,
-    pub(crate) end_unit: usize,
-    pub(crate) program: Arc<FlatSegmentProgram>,
-}
-
 pub(crate) fn split_long_surface_units(
     raw: &[u8],
     units: Vec<FlatSurfaceUnit>,
@@ -837,13 +830,9 @@ pub(crate) fn apply_contextual_analysis(
     raw: &[u8],
     units: &mut [FlatSurfaceUnit],
     cuts: &mut Vec<u64>,
-    vocabulary: &SurfaceVocabulary,
-    use_morphology: bool,
-    maximum_chars: usize,
     cache: &mut FlatAnalysisCache,
-) -> Result<Vec<SurfaceProgramUse>, TokenizerError> {
+) -> Result<(), TokenizerError> {
     let mut segment = Vec::new();
-    let mut programs = Vec::new();
     for index in 0..units.len() {
         let unit = units[index];
         if unit.mode != TokenMode::Turkish
@@ -852,18 +841,7 @@ pub(crate) fn apply_contextual_analysis(
                 LexicalKind::LineBreak | LexicalKind::Control | LexicalKind::Opaque
             )
         {
-            flush_segment(
-                tokenizer,
-                raw,
-                units,
-                cuts,
-                &mut segment,
-                &mut programs,
-                vocabulary,
-                use_morphology,
-                maximum_chars,
-                cache,
-            )?;
+            flush_segment(tokenizer, raw, units, cuts, &mut segment, cache)?;
             continue;
         }
         if unit.kind == LexicalKind::Whitespace {
@@ -872,63 +850,23 @@ pub(crate) fn apply_contextual_analysis(
         segment.push(index);
         let boundary = is_sentence_boundary(unit.kind, raw, unit.span)?;
         if boundary || segment.len() >= tokenizer.config.max_sentence_tokens {
-            flush_segment(
-                tokenizer,
-                raw,
-                units,
-                cuts,
-                &mut segment,
-                &mut programs,
-                vocabulary,
-                use_morphology,
-                maximum_chars,
-                cache,
-            )?;
+            flush_segment(tokenizer, raw, units, cuts, &mut segment, cache)?;
         }
     }
-    flush_segment(
-        tokenizer,
-        raw,
-        units,
-        cuts,
-        &mut segment,
-        &mut programs,
-        vocabulary,
-        use_morphology,
-        maximum_chars,
-        cache,
-    )?;
-    Ok(programs)
+    flush_segment(tokenizer, raw, units, cuts, &mut segment, cache)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn flush_segment(
     tokenizer: &Tokenizer<'_>,
     raw: &[u8],
     units: &mut [FlatSurfaceUnit],
     cuts: &mut Vec<u64>,
     indices: &mut Vec<usize>,
-    programs: &mut Vec<SurfaceProgramUse>,
-    vocabulary: &SurfaceVocabulary,
-    use_morphology: bool,
-    maximum_chars: usize,
     cache: &mut FlatAnalysisCache,
 ) -> Result<(), TokenizerError> {
     if indices.is_empty() {
         return Ok(());
     }
-    let exact = segment_exact_bytes(raw, units, indices)?;
-    let fingerprint = surface_program_fingerprint(exact, SURFACE_PROGRAM_TURKISH);
-    if let Some(program) = cached_surface_program(cache, exact, SURFACE_PROGRAM_TURKISH) {
-        cache.segment_program_hits = cache.segment_program_hits.saturating_add(1);
-        cache.hits = cache
-            .hits
-            .saturating_add(u64::try_from(indices.len()).unwrap_or(u64::MAX));
-        programs.push(program_use(indices, program)?);
-        indices.clear();
-        return Ok(());
-    }
-    cache.segment_program_misses = cache.segment_program_misses.saturating_add(1);
 
     #[cfg(feature = "compiled-surface-table")]
     if let Some(table) = tokenizer.compiled_surface_analysis_table.as_ref() {
@@ -967,36 +905,8 @@ fn flush_segment(
         let sets = owned_sets.iter().map(AsRef::as_ref).collect::<Vec<_>>();
         apply_sets(tokenizer, raw, units, cuts, indices, &sets, cache)?;
     }
-    // Surface tokenization is left-context sensitive: one ASCII space immediately
-    // before the first word may merge into that word's root. The cached sentence
-    // program starts at the first non-whitespace unit, so caching final IDs here
-    // would silently drop that bridge. Cache morphology analysis only; final IDs
-    // are always produced from the real document unit stream below.
-    let _ = (programs, vocabulary, use_morphology, maximum_chars, fingerprint, exact);
     indices.clear();
     Ok(())
-}
-
-fn program_use(
-    indices: &[usize],
-    program: Arc<FlatSegmentProgram>,
-) -> Result<SurfaceProgramUse, TokenizerError> {
-    let start_unit = indices
-        .first()
-        .copied()
-        .ok_or(TokenizerError::InvalidTrainingEncoding(
-            "surface segment has no first unit",
-        ))?;
-    let end_unit = indices
-        .last()
-        .copied()
-        .and_then(|index| index.checked_add(1))
-        .ok_or(TokenizerError::LengthOverflow("surface segment unit end"))?;
-    Ok(SurfaceProgramUse {
-        start_unit,
-        end_unit,
-        program,
-    })
 }
 
 fn insert_surface_program(
@@ -1048,26 +958,6 @@ fn vacant_surface_program_slot(cache: &FlatAnalysisCache, fingerprint: u64) -> O
         slot = (slot + 1) & mask;
     }
     None
-}
-
-fn segment_exact_bytes<'a>(
-    raw: &'a [u8],
-    units: &[FlatSurfaceUnit],
-    indices: &[usize],
-) -> Result<&'a [u8], TokenizerError> {
-    let first = indices.first().and_then(|index| units.get(*index)).ok_or(
-        TokenizerError::InvalidTrainingEncoding("flat surface segment has no first unit"),
-    )?;
-    let last = indices.last().and_then(|index| units.get(*index)).ok_or(
-        TokenizerError::InvalidTrainingEncoding("flat surface segment has no last unit"),
-    )?;
-    unit_bytes(
-        raw,
-        ByteSpan {
-            start: first.span.start,
-            end: last.span.end,
-        },
-    )
 }
 
 fn append_borrowed_surface_program(
@@ -1395,45 +1285,6 @@ fn apply_output(
     Ok(())
 }
 
-fn capture_segment_program(
-    raw: &[u8],
-    units: &[FlatSurfaceUnit],
-    cuts: &[u64],
-    indices: &[usize],
-    vocabulary: &SurfaceVocabulary,
-    use_morphology: bool,
-    maximum_chars: usize,
-) -> Result<FlatSegmentProgram, TokenizerError> {
-    let start_unit = indices
-        .first()
-        .copied()
-        .ok_or(TokenizerError::InvalidTrainingEncoding(
-            "surface segment has no first unit",
-        ))?;
-    let end_unit = indices
-        .last()
-        .copied()
-        .and_then(|index| index.checked_add(1))
-        .ok_or(TokenizerError::LengthOverflow("surface segment unit end"))?;
-    let mut surface_ids = Vec::new();
-    let mut surface_lengths = Vec::new();
-    vocabulary.encode_flat_range_into(
-        raw,
-        units,
-        cuts,
-        start_unit..end_unit,
-        maximum_chars,
-        use_morphology,
-        &mut surface_ids,
-        &mut surface_lengths,
-    )?;
-    Ok(FlatSegmentProgram {
-        tokens: Box::new([]),
-        relative_cuts: Box::new([]),
-        surface_ids: surface_ids.into_boxed_slice(),
-        surface_lengths: surface_lengths.into_boxed_slice(),
-    })
-}
 
 #[cfg(test)]
 mod tests {

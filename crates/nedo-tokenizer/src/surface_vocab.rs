@@ -7,7 +7,7 @@ use nedo_format::ByteSpan;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    flat_surface::{FlatSurfaceUnit, SurfaceProgramUse},
+    flat_surface::FlatSurfaceUnit,
     LexicalKind, TokenizedDocument, TokenizedUnit, TokenizerError, TrainingEncoding,
 };
 
@@ -819,12 +819,11 @@ impl SurfaceVocabulary {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn encode_flat_units_with_programs(
+    pub(crate) fn encode_flat_units(
         &self,
         raw: &[u8],
         units: &[FlatSurfaceUnit],
         cuts: &[u64],
-        programs: &[SurfaceProgramUse],
         maximum_chars: usize,
         newline: bool,
         use_morphology: bool,
@@ -834,36 +833,11 @@ impl SurfaceVocabulary {
         validate_flat_units(raw, units, cuts)?;
         let length_start = lengths.len();
         push_parts(ids, lengths, SURFACE_BOS_ID, 0)?;
-        let mut cursor = 0_usize;
-        for usage in programs {
-            if usage.start_unit < cursor
-                || usage.end_unit <= usage.start_unit
-                || usage.end_unit > units.len()
-                || usage.program.surface_ids.len() != usage.program.surface_lengths.len()
-            {
-                return Err(TokenizerError::InvalidTrainingEncoding(
-                    "surface program unit range or output cardinality is invalid",
-                ));
-            }
-            self.encode_flat_range_into(
-                raw,
-                units,
-                cuts,
-                cursor..usage.start_unit,
-                maximum_chars,
-                use_morphology,
-                ids,
-                lengths,
-            )?;
-            ids.extend_from_slice(&usage.program.surface_ids);
-            lengths.extend_from_slice(&usage.program.surface_lengths);
-            cursor = usage.end_unit;
-        }
         self.encode_flat_range_into(
             raw,
             units,
             cuts,
-            cursor..units.len(),
+            0..units.len(),
             maximum_chars,
             use_morphology,
             ids,
@@ -880,7 +854,7 @@ impl SurfaceVocabulary {
             .sum::<usize>();
         if actual != expected {
             return Err(TokenizerError::InvalidTrainingEncoding(
-                "surface program byte accounting differs from source",
+                "surface byte accounting differs from source",
             ));
         }
         Ok(())
