@@ -1,46 +1,55 @@
 {
-  "algorithm": "morphology-constrained byte-level BPE",
-  "asset_magic": "NDSRF002",
-  "boundary_policy": "morphology-hard with ordinary ASCII space prefix bridge",
-  "byte_fallback_ids": 256,
+  "acceptance_source_commit": "2efedb03c075f2a7f3674780a04f9d15f806d44f",
+  "algorithm": "root-hard suffix-soft byte-level BPE",
+  "asset_magic": "NDSRF004",
+  "boundary_policy": "first Turkish morphology cut hard (root | suffix-chain); internal suffix cuts soft; ordinary ASCII space may prefix the root",
+  "byte_atom_ids": 256,
   "control_ids": 3,
+  "heldout_acceptance": {
+    "bytes": 98844686,
+    "eval_sha256": "41baeea72a4b7ef478b48d50c056b4eb4248249252b80a6e0065a687c3bdfcf6",
+    "records": 137059,
+    "required_boundary_violations": 0,
+    "rich_flat_mismatches": 0,
+    "roundtrip_failures": 0
+  },
   "heldout_benchmark": {
-    "legacy_greedy_32k": {
+    "hard_all_morphology_32k": {
+      "base_byte_pct": 28.703124,
+      "base_byte_tokens": 8611305,
       "bytes": 98844686,
-      "bytes_per_token": 2.342971,
-      "fallback_pct": 4.81846,
-      "fallback_tokens": 2032800,
+      "bytes_per_token": 3.294682,
       "records": 137059,
-      "tokens": 42187752
+      "tokens": 30001281
     },
     "lexical_bpe_32k_ablation": {
+      "base_byte_pct": 29.603153,
+      "base_byte_tokens": 7336375,
       "bytes": 98844686,
-      "bytes_per_token": 3.907097,
-      "fallback_pct": 31.074333,
-      "fallback_tokens": 7861420,
+      "bytes_per_token": 3.988502,
       "records": 137059,
-      "tokens": 25298757
+      "tokens": 24782411
     },
-    "morphology_bpe_32k": {
+    "root_suffix_32k": {
+      "base_byte_pct": 27.758322,
+      "base_byte_tokens": 7473102,
       "bytes": 98844686,
-      "bytes_per_token": 3.241948,
-      "fallback_pct": 29.908948,
-      "fallback_tokens": 9119025,
+      "bytes_per_token": 3.671518,
       "records": 137059,
-      "tokens": 30489287
+      "tokens": 26922024
     }
   },
   "learned_merge_entries": 31741,
   "piece_stats": {
-    "emoji_scalar_entries": 9,
-    "invalid_utf8_entries": 120,
+    "emoji_scalar_entries": 8,
+    "invalid_utf8_entries": 110,
     "learned_entries": 31741,
-    "max_entry_bytes": 91,
-    "mean_entry_bytes": 5.574525062222362,
-    "single_unicode_scalar_entries": 361,
-    "space_prefixed_entries": 16216,
-    "valid_utf8_entries": 31621,
-    "whitespace_only_entries": 118
+    "max_entry_bytes": 88,
+    "mean_entry_bytes": 5.690274408493746,
+    "single_unicode_scalar_entries": 332,
+    "space_prefixed_entries": 14838,
+    "valid_utf8_entries": 31631,
+    "whitespace_only_entries": 114
   },
   "reference_benchmark": {
     "cl100k_base": {
@@ -59,15 +68,15 @@
     },
     {
       "text": "Evlerimizden çıktık.",
-      "tokens": 6
+      "tokens": 5
     },
     {
       "text": "Российская Федерация",
-      "tokens": 18
+      "tokens": 19
     },
     {
       "text": "中华人民共和国",
-      "tokens": 16
+      "tokens": 17
     },
     {
       "text": "😀 👨‍👩‍👧‍👦",
@@ -82,12 +91,12 @@
       "tokens": 4
     }
   ],
-  "schema": "nedotokenizer_surface_vocab_release_v1",
-  "selection_rationale": "Morphology cuts remain hard LM-token boundaries. Lexical Byte-BPE compresses more aggressively but can split Turkish words across morpheme boundaries, so it is retained only as an ablation/runtime-supported format rather than the production asset.",
+  "schema": "nedotokenizer_surface_vocab_release_v2",
+  "selection_rationale": "Keep the root/suffix-chain boundary as the Turkish linguistic invariant, while allowing corpus-frequency BPE to compress arbitrarily many suffix morphemes inside the suffix chain. This reduces token count without allowing learned pieces to absorb a Turkish root together with its suffixes. Lexical Byte-BPE remains a compression ablation; hard-all morphology remains a stricter ablation.",
   "status": "PASS",
-  "surface_payload_sha256": "c471e013a0e43764d79b53598e4cc7d0075d30c683fc75d56775c8d1f56ba539",
-  "surface_vocab_bytes": 303949,
-  "surface_vocab_sha256": "2726b12741fbb877398df200c307655eb7384fbf47795e3f98ca61f7c3e26be9",
+  "surface_payload_sha256": "a7b15673b7973866c397e337c48db369fe5037be1b1b4f6c140a072f8581d79c",
+  "surface_vocab_bytes": 307623,
+  "surface_vocab_sha256": "c4475789f014a425729562d46ea0d016206fe2da8b6f9e9f9f805e427ee509d7",
   "total_embedding_vocab": 32000,
   "trainer": {
     "backend": "huggingface-tokenizers BPE + ByteLevel(use_regex=false)",
@@ -110,8 +119,8 @@
     "split_seed": "0x4e45444f42504531",
     "text_bytes": 2001326142,
     "train_records": 2607219,
-    "train_segment_sha256": "5621d6b8f86c4133d514cecd5b45392fbba20b834997f1a1eaa9184fdc2bfa8a",
-    "train_segmented_bytes": 2263444293
+    "train_segment_sha256": "867a1195c230efa3b59a1ce980f7f40983e191d92c91d5ec246eb171633bc329",
+    "train_segmented_bytes": 2356933407
   },
-  "training_source_commit": "9cb3bfeae6a6f864bb8ebf97ad3f60eaad182540"
+  "training_source_commit": "9d0146e90ff1effdaa0f7ce7a947f1d97093647b"
 }

@@ -21,7 +21,7 @@ struct Counts {
     records: u64,
     bytes: u64,
     tokens: u64,
-    fallback_tokens: u64,
+    base_byte_tokens: u64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,32 +83,32 @@ fn benchmark(
         consume_batch(tokenizer, vocabulary, threads, &batch, &mut source, &mut total)?;
     }
     let bytes_per_token = total.bytes as f64 / total.tokens.max(1) as f64;
-    let fallback_pct = 100.0 * total.fallback_tokens as f64 / total.tokens.max(1) as f64;
+    let base_byte_pct = 100.0 * total.base_byte_tokens as f64 / total.tokens.max(1) as f64;
     println!(
-        "OVERALL\t{}\t{:?}\trecords={}\tbytes={}\ttokens={}\tbytes_per_token={:.6}\tfallback_tokens={}\tfallback_pct={:.6}",
+        "OVERALL\t{}\t{:?}\trecords={}\tbytes={}\ttokens={}\tbytes_per_token={:.6}\tbase_byte_tokens={}\tbase_byte_pct={:.6}",
         label,
         vocabulary.kind(),
         total.records,
         total.bytes,
         total.tokens,
         bytes_per_token,
-        total.fallback_tokens,
-        fallback_pct
+        total.base_byte_tokens,
+        base_byte_pct
     );
     for (source_id, counts) in source.iter().enumerate() {
         if counts.records == 0 {
             continue;
         }
         println!(
-            "SOURCE\t{}\t{}\trecords={}\tbytes={}\ttokens={}\tbytes_per_token={:.6}\tfallback_tokens={}\tfallback_pct={:.6}",
+            "SOURCE\t{}\t{}\trecords={}\tbytes={}\ttokens={}\tbytes_per_token={:.6}\tbase_byte_tokens={}\tbase_byte_pct={:.6}",
             label,
             source_id,
             counts.records,
             counts.bytes,
             counts.tokens,
             counts.bytes as f64 / counts.tokens.max(1) as f64,
-            counts.fallback_tokens,
-            100.0 * counts.fallback_tokens as f64 / counts.tokens.max(1) as f64,
+            counts.base_byte_tokens,
+            100.0 * counts.base_byte_tokens as f64 / counts.tokens.max(1) as f64,
         );
     }
     Ok(())
@@ -154,7 +154,7 @@ fn consume_batch(
             records: 1,
             bytes,
             tokens,
-            fallback_tokens: fallback,
+            base_byte_tokens: fallback,
         };
         add(&mut source[usize::from(record.source_id)], counts);
         add(total, counts);
@@ -166,7 +166,7 @@ fn add(target: &mut Counts, value: Counts) {
     target.records = target.records.saturating_add(value.records);
     target.bytes = target.bytes.saturating_add(value.bytes);
     target.tokens = target.tokens.saturating_add(value.tokens);
-    target.fallback_tokens = target.fallback_tokens.saturating_add(value.fallback_tokens);
+    target.base_byte_tokens = target.base_byte_tokens.saturating_add(value.base_byte_tokens);
 }
 
 fn read_record(reader: &mut BufReader<File>) -> Result<Option<Record>, Box<dyn std::error::Error>> {

@@ -4253,13 +4253,13 @@ mod tests {
     }
 
     #[test]
-    fn production_surface_vocab_preserves_turkish_morphology_boundaries(
+    fn production_surface_vocab_keeps_root_hard_and_suffix_chain_soft(
     ) -> Result<(), super::TokenizerError> {
         let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
         let vocabulary = SurfaceVocabulary::from_bytes(include_bytes!(
             "../../../assets/surface-vocab.bin"
         ))?;
-        assert_eq!(vocabulary.kind(), SurfaceVocabularyKind::ByteBpe);
+        assert_eq!(vocabulary.kind(), SurfaceVocabularyKind::RootSuffixByteBpe);
 
         let raw = "Ananızı öpeyim".as_bytes().to_vec();
         let document = tokenizer.tokenize(raw.clone())?;
@@ -4277,7 +4277,7 @@ mod tests {
             pieces.push(std::str::from_utf8(&raw[cursor..end]).expect("valid UTF-8 piece"));
             cursor = end;
         }
-        assert_eq!(pieces, ["Ana", "nız", "ı", " öp", "e", "yim"]);
+        assert_eq!(pieces, ["Ana", "nızı", " öp", "eyim"]);
         assert_eq!(vocabulary.decode_ids(&encoded.ids)?, raw);
         Ok(())
     }

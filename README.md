@@ -29,13 +29,13 @@ Ordinary single ASCII inter-word spaces are prefix-bridgeable at the surface-voc
 
 ## Byte-BPE v3
 
-The tokenizer can load three explicitly versioned surface-vocabulary contracts: legacy greedy-longest (`NDSRF001`), morphology-constrained byte BPE (`NDSRF002`), and lexical-boundary byte BPE (`NDSRF003`). The BPE formats use learned-entry order as merge rank while retaining the fixed 256 exact-byte IDs, so there is still no `UNK`. In the selected lexical policy, morphology remains available as analysis metadata but does not force final LM token boundaries. See `docs/byte-bpe-v3.md` for the ablation and acceptance gates.
+The tokenizer can load four explicitly versioned surface-vocabulary contracts: legacy greedy-longest (`NDSRF001`), hard-all morphology Byte-BPE (`NDSRF002`), lexical-boundary Byte-BPE (`NDSRF003`), and root-hard/suffix-soft Byte-BPE (`NDSRF004`). The BPE formats use learned-entry order as merge rank while retaining the fixed 256 exact-byte IDs, so there is still no `UNK`. `NDSRF004` is the production policy. See `docs/byte-bpe-v3.md` for the ablation and acceptance gates.
 
 ## Source
 
 The tokenizer core is implemented in Rust. The Python package calls the same native core through PyO3.
 
-The released 32K surface vocabulary is `assets/surface-vocab.bin`. The production asset uses morphology-constrained Byte-BPE (`NDSRF002`): Turkish morphology cuts remain hard LM-token boundaries, while one ordinary ASCII inter-word space may prefix the following word/number's first morpheme. This preserves NedoTokenizer's morphology contract while eliminating the standalone-space tax. `NDSRF003` lexical Byte-BPE remains supported for ablation/compatibility but is not the production asset.
+The released 32K surface vocabulary is `assets/surface-vocab.bin`. The production asset uses root-hard/suffix-soft Byte-BPE (`NDSRF004`). For a morphologically analyzed Turkish word, only the first morphology cut is a hard LM-token boundary: `gel | di | m` is exposed to BPE as `gel | dim`, while `ev | ler | imiz | den` is exposed as `ev | lerimizden`. BPE may still split either side further if the vocabulary does not contain a larger learned piece. One ordinary ASCII inter-word space may prefix the root, e.g. `[ gel] [dim]`. No word-specific exceptions are used.
 
 ## License
 

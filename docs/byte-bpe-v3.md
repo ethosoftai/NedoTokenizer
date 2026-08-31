@@ -25,7 +25,8 @@ The design follows the same broad byte-level BPE family used by OpenAI Tiktoken 
 1. **Legacy GreedyLongest** — released v0.2 surface vocabulary.
 2. **Morphology Byte-BPE (`NDSRF002`)** — BPE rank merges, but Turkish morphology cuts remain hard LM-token boundaries. One ordinary ASCII inter-word space can prefix the following first segment.
 3. **Lexical Byte-BPE (`NDSRF003`)** — BPE rank merges at scanner/lexical boundaries. Morphological analyses and cuts remain available as metadata but no longer force LM-token boundaries. One ordinary ASCII space can prefix the following word/number.
-4. **Raw GPT-style 32K baseline** — Hugging Face ByteLevel BPE with its GPT-2-style regex pre-tokenization; used only as a compression reference.
+4. **Root-hard / suffix-soft Byte-BPE (`NDSRF004`)** — the first Turkish morphology cut stays hard (`root | suffix-chain`), while later suffix cuts are soft and may be merged by corpus-frequency BPE. One ordinary ASCII space may prefix the root. This is the production policy.
+5. **Raw GPT-style 32K baseline** — Hugging Face ByteLevel BPE with its GPT-2-style regex pre-tokenization; used only as a compression reference.
 
 The stable binary header identifies the segmentation algorithm, so an old greedy asset cannot silently be interpreted as a BPE asset.
 
@@ -52,7 +53,7 @@ Results:
 
 The OpenAI rows are not size-matched (100K/200K vs 32K) and this balanced MercanSet subset is Turkish/domain-heavy; they are reference measurements, not universal tokenizer rankings.
 
-Lexical Byte-BPE is more compression-efficient, but that gain comes from allowing LM tokens to cross Turkish morphology cuts. A release probe such as `Ananızı öpeyim` then permits `[An] [anızı] [ öp] [eyim]` despite the analyzer producing `ana | nız | ı` and `öp | e | yim`. For NedoTokenizer this violates the intended linguistic contract. The production asset is therefore **Morphology Byte-BPE (`NDSRF002`)**. Lexical Byte-BPE (`NDSRF003`) remains implemented and benchmarked as an ablation, not as the shipped vocabulary.
+Lexical Byte-BPE is the strongest compression ablation, but it can absorb a Turkish root together with its suffixes. Hard-all morphology prevents that but also forces every suffix boundary to spend a separate BPE segment. The selected compromise is **Root-hard / suffix-soft Byte-BPE (`NDSRF004`)**: `gel | di | m` becomes the two BPE regions `gel | dim`, and `ev | ler | imiz | den` becomes `ev | lerimizden`. These are allowed regions, not hard-coded output tokens: BPE may split them further according to the learned 32K vocabulary. There are no word-specific exceptions.
 
 ## Training implementation
 
@@ -79,12 +80,18 @@ A final asset is accepted only if all of the following pass:
 - held-out compression benchmark against the released 32K asset;
 - no silent fallback to a different segmentation algorithm.
 
-## Final 2 GB morphology-constrained release run
+## Final 2 GB root-hard / suffix-soft release run
 
-The selected production asset was retrained on the full deterministic 2,001,326,142-byte MercanSet V11 source-aware sample (2,744,278 records, 30 sources), with the same `doc_key` 95/5 split seed. Held-out evaluation contains 137,059 records / 98,844,686 bytes.
+The production asset was trained on the full deterministic 2,001,326,142-byte MercanSet V11 source-aware sample (2,744,278 records, 30 sources), with a deterministic `doc_key` 95/5 split. Held-out evaluation contains 137,059 records / 98,844,686 bytes.
 
-- Morphology Byte-BPE 32K: 30,489,287 tokens, 3.241948 bytes/token.
-- Lexical Byte-BPE 32K ablation: 25,298,757 tokens, 3.907097 bytes/token.
-- Production asset SHA-256: `2726b12741fbb877398df200c307655eb7384fbf47795e3f98ca61f7c3e26be9`.
+| 32K policy | Held-out tokens | Bytes/token |
+|---|---:|---:|
+| Hard-all morphology (`NDSRF002`) | 30,001,281 | 3.294682 |
+| **Root-hard / suffix-soft (`NDSRF004`)** | **26,922,024** | **3.671518** |
+| Lexical BPE ablation (`NDSRF003`) | 24,782,411 | 3.988502 |
 
-The morphology constraint costs compression relative to the lexical ablation, but it preserves hard Turkish morpheme boundaries. Ordinary ASCII whitespace is still bridgeable into the following first morpheme, so `[ öp]` is valid while `[eyim]` across `e | yim` is not.
+The selected policy uses about 10.3% fewer tokens than hard-all morphology while retaining the root/suffix-chain boundary as a hard invariant. The lexical ablation compresses further, but removes that invariant.
+
+Full held-out acceptance additionally requires rich/reference IDs to equal production/flat IDs. On all 137,059 held-out documents: mismatches = 0, byte-roundtrip failures = 0, required root-boundary violations = 0.
+
+Production asset SHA-256: `c4475789f014a425729562d46ea0d016206fe2da8b6f9e9f9f805e427ee509d7`.
