@@ -1,10 +1,19 @@
 {
-  "algorithm": "lexical-constrained byte-level BPE",
-  "asset_magic": "NDSRF003",
+  "algorithm": "morphology-constrained byte-level BPE",
+  "asset_magic": "NDSRF002",
+  "boundary_policy": "morphology-hard with ordinary ASCII space prefix bridge",
   "byte_fallback_ids": 256,
   "control_ids": 3,
   "heldout_benchmark": {
-    "final32k": {
+    "legacy_greedy_32k": {
+      "bytes": 98844686,
+      "bytes_per_token": 2.342971,
+      "fallback_pct": 4.81846,
+      "fallback_tokens": 2032800,
+      "records": 137059,
+      "tokens": 42187752
+    },
+    "lexical_bpe_32k_ablation": {
       "bytes": 98844686,
       "bytes_per_token": 3.907097,
       "fallback_pct": 31.074333,
@@ -12,26 +21,26 @@
       "records": 137059,
       "tokens": 25298757
     },
-    "old32k": {
+    "morphology_bpe_32k": {
       "bytes": 98844686,
-      "bytes_per_token": 2.342971,
-      "fallback_pct": 4.81846,
-      "fallback_tokens": 2032800,
+      "bytes_per_token": 3.241948,
+      "fallback_pct": 29.908948,
+      "fallback_tokens": 9119025,
       "records": 137059,
-      "tokens": 42187752
+      "tokens": 30489287
     }
   },
   "learned_merge_entries": 31741,
   "piece_stats": {
-    "emoji_scalar_entries": 5,
-    "invalid_utf8_entries": 91,
+    "emoji_scalar_entries": 9,
+    "invalid_utf8_entries": 120,
     "learned_entries": 31741,
-    "max_entry_bytes": 82,
-    "mean_entry_bytes": 6.615607573800447,
-    "single_unicode_scalar_entries": 271,
-    "space_prefixed_entries": 18954,
-    "valid_utf8_entries": 31650,
-    "whitespace_only_entries": 103
+    "max_entry_bytes": 91,
+    "mean_entry_bytes": 5.574525062222362,
+    "single_unicode_scalar_entries": 361,
+    "space_prefixed_entries": 16216,
+    "valid_utf8_entries": 31621,
+    "whitespace_only_entries": 118
   },
   "reference_benchmark": {
     "cl100k_base": {
@@ -50,15 +59,15 @@
     },
     {
       "text": "Evlerimizden çıktık.",
-      "tokens": 4
+      "tokens": 6
     },
     {
       "text": "Российская Федерация",
-      "tokens": 19
+      "tokens": 18
     },
     {
       "text": "中华人民共和国",
-      "tokens": 19
+      "tokens": 16
     },
     {
       "text": "😀 👨‍👩‍👧‍👦",
@@ -74,10 +83,11 @@
     }
   ],
   "schema": "nedotokenizer_surface_vocab_release_v1",
+  "selection_rationale": "Morphology cuts remain hard LM-token boundaries. Lexical Byte-BPE compresses more aggressively but can split Turkish words across morpheme boundaries, so it is retained only as an ablation/runtime-supported format rather than the production asset.",
   "status": "PASS",
-  "surface_payload_sha256": "ee309aa632c240165de2188964a079dafd59707a85b2f950b0aa854438e96547",
-  "surface_vocab_bytes": 336994,
-  "surface_vocab_sha256": "f8528d2c7479bba829b68aa82f6c5dfc68e414e1a11d04c871b31a3f34f2ac50",
+  "surface_payload_sha256": "c471e013a0e43764d79b53598e4cc7d0075d30c683fc75d56775c8d1f56ba539",
+  "surface_vocab_bytes": 303949,
+  "surface_vocab_sha256": "2726b12741fbb877398df200c307655eb7384fbf47795e3f98ca61f7c3e26be9",
   "total_embedding_vocab": 32000,
   "trainer": {
     "backend": "huggingface-tokenizers BPE + ByteLevel(use_regex=false)",
@@ -86,7 +96,7 @@
     "retained_merge_entries": 31741,
     "tiktoken_version": "0.13.0",
     "tokenizers_version": "0.20.3",
-    "trainer_merge_entries": 32758,
+    "trainer_merge_entries": 32757,
     "trainer_requested_vocab_size": 33021,
     "trainer_vocab_size": 33021
   },
@@ -103,5 +113,5 @@
     "train_segment_sha256": "5621d6b8f86c4133d514cecd5b45392fbba20b834997f1a1eaa9184fdc2bfa8a",
     "train_segmented_bytes": 2263444293
   },
-  "training_source_commit": "f6bfef7c11ab9a124262e4f8c6501ef22d3f4b98"
+  "training_source_commit": "9cb3bfeae6a6f864bb8ebf97ad3f60eaad182540"
 }

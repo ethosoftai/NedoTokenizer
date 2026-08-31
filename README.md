@@ -35,7 +35,7 @@ The tokenizer can load three explicitly versioned surface-vocabulary contracts: 
 
 The tokenizer core is implemented in Rust. The Python package calls the same native core through PyO3.
 
-The released 32K surface vocabulary is `assets/surface-vocab.bin`. The current asset uses lexical Byte-BPE (`NDSRF003`): scanner boundaries remain structural, one ordinary ASCII inter-word space may prefix the following word/number, and Turkish morphology remains available as analysis metadata rather than forcing LM token boundaries. The large precompiled surface-analysis lookup table is only a throughput accelerator and is not required for correct tokenization, so it is not included here.
+The released 32K surface vocabulary is `assets/surface-vocab.bin`. The production asset uses morphology-constrained Byte-BPE (`NDSRF002`): Turkish morphology cuts remain hard LM-token boundaries, while one ordinary ASCII inter-word space may prefix the following word/number's first morpheme. This preserves NedoTokenizer's morphology contract while eliminating the standalone-space tax. `NDSRF003` lexical Byte-BPE remains supported for ablation/compatibility but is not the production asset.
 
 ## License
 

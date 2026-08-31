@@ -4234,8 +4234,8 @@ impl From<DisambiguationError> for TokenizerError {
 mod tests {
     use super::{
         decode_tokenized, encode_tokenized, CharacterVocabulary, SurfaceEncoderOptions,
-        SurfaceVocabulary, TokenMode, TokenStatus, Tokenizer, TokenizerConfig, TokenizerMode,
-        TrainingEncodingOptions,
+        SurfaceVocabulary, SurfaceVocabularyKind, TokenMode, TokenStatus, Tokenizer, TokenizerConfig,
+        TokenizerMode, TrainingEncodingOptions,
     };
 
     #[test]
@@ -4256,6 +4256,36 @@ mod tests {
             .any(|unit| unit.mode == TokenMode::Code));
         let encoded = encode_tokenized(&document)?;
         assert_eq!(decode_tokenized(&encoded)?, document);
+        Ok(())
+    }
+
+    #[test]
+    fn production_surface_vocab_preserves_turkish_morphology_boundaries(
+    ) -> Result<(), super::TokenizerError> {
+        let tokenizer = Tokenizer::embedded(TokenizerConfig::default())?;
+        let vocabulary = SurfaceVocabulary::from_bytes(include_bytes!(
+            "../../../assets/surface-vocab.bin"
+        ))?;
+        assert_eq!(vocabulary.kind(), SurfaceVocabularyKind::ByteBpe);
+
+        let raw = "Ananızı öpeyim".as_bytes().to_vec();
+        let document = tokenizer.tokenize(raw.clone())?;
+        assert_eq!(document.units()[0].cuts, vec![3, 7]);
+        assert_eq!(document.units()[2].cuts, vec![13, 14]);
+
+        let encoded = vocabulary.encode_document(&document, false)?;
+        let mut cursor = 0_usize;
+        let mut pieces = Vec::new();
+        for &length in &encoded.lengths {
+            if length == 0 {
+                continue;
+            }
+            let end = cursor + usize::from(length);
+            pieces.push(std::str::from_utf8(&raw[cursor..end]).expect("valid UTF-8 piece"));
+            cursor = end;
+        }
+        assert_eq!(pieces, ["Ana", "nız", "ı", " öp", "e", "yim"]);
+        assert_eq!(vocabulary.decode_ids(&encoded.ids)?, raw);
         Ok(())
     }
 

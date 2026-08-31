@@ -52,7 +52,7 @@ Results:
 
 The OpenAI rows are not size-matched (100K/200K vs 32K) and this balanced MercanSet subset is Turkish/domain-heavy; they are reference measurements, not universal tokenizer rankings.
 
-Lexical Byte-BPE is only about 4.5% more tokens than the raw 32K baseline on this held-out set while preserving Nedo scanner structure and the separate morphology analysis path. Hard morphology cuts cost about 16.9% tokens relative to Lexical Byte-BPE on the same data. Therefore the production candidate is **Lexical Byte-BPE**.
+Lexical Byte-BPE is more compression-efficient, but that gain comes from allowing LM tokens to cross Turkish morphology cuts. A release probe such as `Ananızı öpeyim` then permits `[An] [anızı] [ öp] [eyim]` despite the analyzer producing `ana | nız | ı` and `öp | e | yim`. For NedoTokenizer this violates the intended linguistic contract. The production asset is therefore **Morphology Byte-BPE (`NDSRF002`)**. Lexical Byte-BPE (`NDSRF003`) remains implemented and benchmarked as an ablation, not as the shipped vocabulary.
 
 ## Training implementation
 
@@ -78,3 +78,13 @@ A final asset is accepted only if all of the following pass:
 - deterministic train/eval split and input/output SHA-256 manifests;
 - held-out compression benchmark against the released 32K asset;
 - no silent fallback to a different segmentation algorithm.
+
+## Final 2 GB morphology-constrained release run
+
+The selected production asset was retrained on the full deterministic 2,001,326,142-byte MercanSet V11 source-aware sample (2,744,278 records, 30 sources), with the same `doc_key` 95/5 split seed. Held-out evaluation contains 137,059 records / 98,844,686 bytes.
+
+- Morphology Byte-BPE 32K: 30,489,287 tokens, 3.241948 bytes/token.
+- Lexical Byte-BPE 32K ablation: 25,298,757 tokens, 3.907097 bytes/token.
+- Production asset SHA-256: `2726b12741fbb877398df200c307655eb7384fbf47795e3f98ca61f7c3e26be9`.
+
+The morphology constraint costs compression relative to the lexical ablation, but it preserves hard Turkish morpheme boundaries. Ordinary ASCII whitespace is still bridgeable into the following first morpheme, so `[ öp]` is valid while `[eyim]` across `e | yim` is not.
