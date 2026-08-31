@@ -2,7 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::{BufReader, Read};
 
-use nedo_tokenizer::{SurfaceVocabulary, Tokenizer, TokenizerConfig};
+use nedo_tokenizer::{SurfaceVocabulary, SurfaceVocabularyKind, Tokenizer, TokenizerConfig};
 
 const INPUT_MAGIC: &[u8; 8] = b"MVOCBIN1";
 const MAX_BATCH_RECORDS: usize = 2048;
@@ -68,7 +68,7 @@ fn verify(
         consume(tokenizer, vocabulary, threads, &batch, &mut records, &mut bytes, &mut tokens)?;
     }
     println!(
-        "PARITY\t{}\t{:?}\trecords={}\tbytes={}\ttokens={}\tmismatches=0\troundtrip_failures=0",
+        "PARITY\t{}\t{:?}\trecords={}\tbytes={}\ttokens={}\tmismatches=0\troundtrip_failures=0\tboundary_violations=0",
         label,
         vocabulary.kind(),
         records,
@@ -105,6 +105,44 @@ fn consume(
         }
         if vocabulary.decode_ids(flat_ids)? != record.raw {
             return Err(format!("surface roundtrip mismatch at record {}", *records + index as u64).into());
+        }
+        let mut token_boundaries = Vec::with_capacity(flat_lengths.len());
+        let mut byte_cursor = 0_u64;
+        for &length in flat_lengths {
+            if length == 0 {
+                continue;
+            }
+            byte_cursor = byte_cursor.saturating_add(u64::from(length));
+            token_boundaries.push(byte_cursor);
+        }
+        for unit in document.units() {
+            match vocabulary.kind() {
+                SurfaceVocabularyKind::ByteBpe | SurfaceVocabularyKind::GreedyLongest => {
+                    for &cut in &unit.cuts {
+                        if token_boundaries.binary_search(&cut).is_err() {
+                            return Err(format!(
+                                "morphology boundary violation at record {} byte {}",
+                                *records + index as u64,
+                                cut
+                            )
+                            .into());
+                        }
+                    }
+                }
+                SurfaceVocabularyKind::RootSuffixByteBpe => {
+                    if let Some(&root_end) = unit.cuts.first() {
+                        if token_boundaries.binary_search(&root_end).is_err() {
+                            return Err(format!(
+                                "root boundary violation at record {} byte {}",
+                                *records + index as u64,
+                                root_end
+                            )
+                            .into());
+                        }
+                    }
+                }
+                SurfaceVocabularyKind::LexicalByteBpe => {}
+            }
         }
         *bytes = bytes.saturating_add(u64::try_from(record.raw.len())?);
         *tokens = tokens.saturating_add(
