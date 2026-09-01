@@ -1,0 +1,77 @@
+{
+  "algorithm": "root-suffix-constrained byte-level BPE",
+  "boundary_policy": "root-suffix",
+  "boundary_sentinel_hex": "1f",
+  "corpus": {
+    "records": 9721881,
+    "segmented_bytes": 23210611873,
+    "sentinels": 4206279486
+  },
+  "elapsed_seconds": 590.1817305088043,
+  "fixed_byte_fallback_ids": 256,
+  "fixed_control_ids": 3,
+  "hf_merges_sha256": "ec4f3c8a95ddef796c8230a1afe99f8fce033177db7a1604b56d85af76c2d888",
+  "hf_tokenizer_sha256": "4f55f04a500348c4faec664d213ef172364443bdc84ec6c7f21b5ffb35b495b0",
+  "input": "/arf/scratch/egitimg16u1/mercan/nedotokenizer_vocab20g_20260901/output/train-root-suffix.nseg",
+  "input_sha256": "4923063ce227a77a81c7679c0ba89174c17cbc6eac4ce8a7e7cc3bad5dd11132",
+  "learned_merge_entries": 31741,
+  "max_token_bytes": 48,
+  "min_frequency": 100,
+  "piece_stats": {
+    "emoji_scalar_entries": 15,
+    "invalid_utf8_entries": 94,
+    "learned_entries": 31741,
+    "max_entry_bytes": 47,
+    "mean_entry_bytes": 5.667244258214927,
+    "single_unicode_scalar_entries": 310,
+    "space_prefixed_entries": 15761,
+    "valid_utf8_entries": 31647,
+    "whitespace_only_entries": 64
+  },
+  "retained_merge_entries": 31741,
+  "roundtrip_smoke": [
+    {
+      "text": "Bugün hava çok güzel.",
+      "tokens": 5
+    },
+    {
+      "text": "Evlerimizden çıktık.",
+      "tokens": 5
+    },
+    {
+      "text": "Российская Федерация",
+      "tokens": 19
+    },
+    {
+      "text": "中华人民共和国",
+      "tokens": 18
+    },
+    {
+      "text": "😀 👨‍👩‍👧‍👦",
+      "tokens": 16
+    },
+    {
+      "text": "        print(x)",
+      "tokens": 5
+    },
+    {
+      "text": "\n\n    indentation",
+      "tokens": 4
+    }
+  ],
+  "schema": "nedo_surface_bpe_training_v1",
+  "status": "PASS",
+  "surface_payload_sha256": "5e90de148c96008baa506d3647c0353c1479d3938cd18c785fe0bb9cd10fa629",
+  "surface_vocab": "/arf/scratch/egitimg16u1/mercan/nedotokenizer_vocab20g_20260901/output/model-max48/surface-vocab-32k-nedo-bpe.bin",
+  "surface_vocab_bytes": 306892,
+  "surface_vocab_sha256": "72412d981dac65a29d1767bc98821fc2bcffc2de53c534e7c719598515bfb600",
+  "tiktoken_audit_file": "/arf/scratch/egitimg16u1/mercan/nedotokenizer_vocab20g_20260901/output/model-max48/surface-vocab-32k-nedo-bpe.tiktoken",
+  "tiktoken_audit_sha256": "271182f7de0c47b9b704b1960937e523e503a12d2ac117be803f61ce2448cbc7",
+  "tiktoken_version": "0.13.0",
+  "tokenizers_version": "0.20.3",
+  "total_embedding_vocab": 32000,
+  "trainer_merge_entries": 32761,
+  "trainer_requested_vocab_size": 33021,
+  "trainer_vocab_size": 33021,
+  "training_backend": "huggingface-tokenizers BPE + ByteLevel(use_regex=false)"
+}
