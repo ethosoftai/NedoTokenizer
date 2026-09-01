@@ -35,7 +35,7 @@ The tokenizer can load four explicitly versioned surface-vocabulary contracts: l
 
 The tokenizer core is implemented in Rust. The Python package calls the same native core through PyO3.
 
-The released 32K surface vocabulary is `assets/surface-vocab.bin`. The production asset uses root-hard/suffix-soft Byte-BPE (`NDSRF004`). For a morphologically analyzed Turkish word, only the first morphology cut is a hard LM-token boundary: `gel | di | m` is exposed to BPE as `gel | dim`, while `ev | ler | imiz | den` is exposed as `ev | lerimizden`. BPE may still split either side further if the vocabulary does not contain a larger learned piece. One ordinary ASCII inter-word space may prefix the root, e.g. `[ gel] [dim]`. No word-specific exceptions are used.
+The released 32K surface vocabulary is `assets/surface-vocab.bin`. The current production vocabulary was trained from a source-aware 20 GB MercanSet V11 sample (`min_frequency=100`, maximum learned piece length 48 bytes) and uses root-hard/suffix-soft Byte-BPE (`NDSRF004`). For a morphologically analyzed Turkish word, only the first morphology cut is a hard LM-token boundary: `gel | di | m` is exposed to BPE as `gel | dim`, while `ev | ler | imiz | den` is exposed as `ev | lerimizden`. BPE may still split either side further if the vocabulary does not contain a larger learned piece. One ordinary ASCII inter-word space may prefix the root, e.g. `[ gel] [dim]`. No word-specific exceptions are used.
 
 ## License
 
